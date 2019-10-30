@@ -6,15 +6,14 @@ import h5py
 import numpy as np
 
 
-def load_openl3_time_series(hdf5_path, delta_mins=15):
-    aggr_func = None
+def load_openl3_time_series(hdf5_path, delta_mins=15, aggr_func=None):
     if aggr_func is None:
         # By default, just take the center embedding
         aggr_func = lambda x: x[len(x)//2]
 
     # Set slot duration
     delta = datetime.timedelta(minutes=delta_mins)
-    
+
     with h5py.File(hdf5_path) as f:
 
         # Get embedding size
@@ -65,7 +64,7 @@ def load_openl3_time_series(hdf5_path, delta_mins=15):
     # Convert to np.array
     X = np.array(X)
     mask = np.array(mask)
-    
+
     return X, mask
 
 
@@ -76,11 +75,11 @@ if __name__ == '__main__':
     parser.add_argument('delta_mins', type=int, default=15)
 
     args = parser.parse_args()
-    
+
     out_fname = "{}_{}minslot.npz".format(os.path.basename(args.hdf5_path).split('.')[0],
                                           args.delta_mins)
     out_path = os.path.join(args.output_path, out_fname)
-    
-    
+
+
     X, mask = load_openl3_time_series(args.hdf5_path, delta_mins=args.delta_mins)
     np.savez_compressed(out_path, X=X, mask=mask)
