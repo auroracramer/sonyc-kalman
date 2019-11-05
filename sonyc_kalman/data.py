@@ -100,5 +100,5 @@ if __name__ == '__main__':
     out_path = os.path.join(args.output_path, out_fname)
 
     
-    X, mask = load_openl3_time_series(args.hdf5_path, delta_mins=args.delta_mins, aggr_func=)
+    X, mask = load_openl3_time_series(args.hdf5_path, delta_mins=args.delta_mins, aggr_func=aggr_func)
     np.savez_compressed(out_path, X=X, mask=mask)
