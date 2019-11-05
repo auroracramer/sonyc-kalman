@@ -5,6 +5,8 @@ import pandas as pd
 import h5py
 import numpy as np
 
+import data_aggr
+
 
 def load_openl3_time_series(hdf5_path, delta_mins=15, aggr_func=None):
     if aggr_func is None:
@@ -73,13 +75,30 @@ if __name__ == '__main__':
     parser.add_argument('hdf5_path')
     parser.add_argument('output_path', default='.')
     parser.add_argument('delta_mins', type=int, default=15)
+    # Aggregation mode flag
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('-r', '--random', action='store_true')
+    group.add_argument('-c', '--centroid', action='store_true')
+    group.add_argument('-m', '--medoid', action='store_true')
+    group.add_argument('-a', '--anti_medoid', action='store_true')
 
     args = parser.parse_args()
+    
+    aggr_func = None
+    if args.random:
+        aggr_func = data_aggr.random
+    if args.centroid:
+        aggr_func = data_aggr.centroid
+    if args.medoid:
+        aggr_func = data_aggr.medoid
+    if args.anti_medoid:
+        aggr_func = data_aggr.anti_medoid
+        
 
     out_fname = "{}_{}minslot.npz".format(os.path.basename(args.hdf5_path).split('.')[0],
                                           args.delta_mins)
     out_path = os.path.join(args.output_path, out_fname)
 
-
-    X, mask = load_openl3_time_series(args.hdf5_path, delta_mins=args.delta_mins)
+    
+    X, mask = load_openl3_time_series(args.hdf5_path, delta_mins=args.delta_mins, aggr_func=)
     np.savez_compressed(out_path, X=X, mask=mask)
