@@ -23,7 +23,7 @@ def load_openl3_time_series(hdf5_path, delta_mins=15, aggr_func=None):
         X = []
         mask = []
         curr_slot_emb_list = []
-        curr_upper_ts = datetime.datetime.utcfromtimestamp(timestamps[0]) + delta
+        curr_upper_ts = datetime.datetime.utcfromtimestamp(f['openl3'][0]['timestamp']) + delta
 
         # Construct time series
         for idx in range(len(f['openl3'])):
