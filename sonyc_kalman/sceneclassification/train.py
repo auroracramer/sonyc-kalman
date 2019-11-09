@@ -28,9 +28,11 @@ def train_model(data_dir, output_dir, valid_ratio=0.1, weight_decay=1.0,
     params = {
         'data_dir': data_dir,
         'output_dir': output_dir,
+        'valid_ratio': valid_ratio,
         'weight_decay': weight_decay,
         'n_cpus': n_cpus,
-        'ignore_classes': ignore_classes
+        'ignore_classes': ignore_classes,
+        'random_seed': random_seed
     }
     with open(params_path, 'w') as f:
         json.dump(params, f)
