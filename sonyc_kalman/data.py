@@ -76,27 +76,25 @@ if __name__ == '__main__':
     parser.add_argument('output_path', default='.')
     parser.add_argument('delta_mins', type=int, default=15)
     # Aggregation mode flag
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument('-r', '--random', action='store_true')
-    group.add_argument('-c', '--centroid', action='store_true')
-    group.add_argument('-m', '--medoid', action='store_true')
-    group.add_argument('-a', '--anti_medoid', action='store_true')
+    parser.add_argument("-a", "--aggr", required=True, 
+                        choices=['random','centroid','medoid','anti_medoid'],
+                        help="Aggregation method to use")
 
     args = parser.parse_args()
     
-    aggr_func = None
-    if args.random:
+    if args.aggr == 'random':
         aggr_func = data_aggr.random
-    if args.centroid:
+    if args.aggr == 'centroid':
         aggr_func = data_aggr.centroid
-    if args.medoid:
+    if args.aggr == 'medoid':
         aggr_func = data_aggr.medoid
-    if args.anti_medoid:
+    if args.aggr == 'anti_medoid':
         aggr_func = data_aggr.anti_medoid
         
 
-    out_fname = "{}_{}minslot.npz".format(os.path.basename(args.hdf5_path).split('.')[0],
-                                          args.delta_mins)
+    out_fname = "{}_{}minslot_{}.npz".format(os.path.basename(args.hdf5_path).split('.')[0],
+                                             args.delta_mins,
+                                             args.aggr)
     out_path = os.path.join(args.output_path, out_fname)
 
     
