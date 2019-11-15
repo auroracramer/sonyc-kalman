@@ -47,26 +47,37 @@ if __name__=='__main__':
     sensor_name = params.sensor.split('/')[-1]
     
     print('Loading data from {}'.format(sensor_name))
+    
+    #loads data and mask from sensor
     data, mask = load_data(params.sensor)
 
+    #loads additional mask, if present
     if params.mask_path is not None:
         mask_npz = np.load(params.mask_path)
         mask = mask_npz['mask']
-        data[mask] = ma.masked
     
+    #applies mask to data
+    data[mask] = ma.masked
+    
+    #limits data, for testing purposes
     if params.data_range is not None:
         data = data[:params.data_range] 
     
+    
     print('Training Kalman Filter: Sensor: {},\t N_Iterations: {},\t Latent Space Dim{}'\
           .format(sensor_name, params.n_iter, params.latent_dim))
-        
+    
+    #constructs kalman filter to specifications (PCA NOT YET APPIED)
     kf = pk.KalmanFilter(n_dim_state=params.latent_dim,\
                          n_dim_obs=data.shape[1],\
                          em_vars='all')
+    
+    #runs EM and stores result
     kf_trained = kf.em(data, n_iter=params.n_iter)
     
     print('Training complete, saving result to {}'.format(params.output_path))
     
+    #dumps result to pickle file
     if params.model_name is not None:
         model_name = params.model_name+'.pkl'
     else:
