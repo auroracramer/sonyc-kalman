@@ -3,7 +3,7 @@ import sys
 import os
 import pickle
 
-import pykalman
+import pykalman as pk
 from numpy import ma
 from data import load_openl3_time_series as load_data
 
