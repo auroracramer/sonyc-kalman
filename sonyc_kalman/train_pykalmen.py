@@ -29,23 +29,31 @@ def process_arguments(args):
                         dest='data_range', type=int, default=None,
                         help='Upper index bound on data')
     
-    parser.add_argument('--model_name', type=str, default = 'pykalman',
+    parser.add_argument('--model_name', type=str, default = None,
                         help='Name to store model under')
     
     parser.add_argument('--output_path', type=str,
                         help='Path to store trained pykalman output')
     
+    parser.add_argument('--mask_path', type=str, default = None,
+                        help='Path to load the mask for the data')
+    
     return parser.parse_args(args)
 
 if __name__=='__main__':
     params = process_arguments(sys.argv[1:])
+    
+    #loads sensor name
     sensor_name = params.sensor.split('/')[-1]
     
     print('Loading data from {}'.format(sensor_name))
     data, mask = load_data(params.sensor)
-    mask = (mask==0).astype('int') #due to masked data being denoted by 1,
-                                   #opposite of numpy convention
-    data[mask] = ma.masked
+
+    if params.mask_path is not None:
+        mask_npz = np.load(params.mask_path)
+        mask = mask_npz['mask']
+        data[mask] = ma.masked
+    
     if params.data_range is not None:
         data = data[:params.data_range] 
     
@@ -59,7 +67,12 @@ if __name__=='__main__':
     
     print('Training complete, saving result to {}'.format(params.output_path))
     
-    with open(os.path.join(params.output_path, params.model_name+'.pkl'), 'wb') as fd:
+    if params.model_name is not None:
+        model_name = params.model_name+'.pkl'
+    else:
+        model_name = sensor_name + '_model.pkl'
+    
+    with open(os.path.join(params.output_path, model_name), 'wb') as fd:
         pickle.dump(kf_trained, fd)
 
         
