@@ -9,13 +9,10 @@ class KalmanFilter(object):
     network alpha.
     """
 
-    # JTC: Remove u
-    def __init__(self, dim_z, dim_y, dim_u=0, dim_k=1, **kwargs):
+    def __init__(self, dim_z, dim_y, dim_k=1, **kwargs):
 
         self.dim_z = dim_z
         self.dim_y = dim_y
-        # JTC: Remove u
-        self.dim_u = dim_u
         self.dim_k = dim_k
 
         # Initializer for identity matrix
@@ -33,10 +30,6 @@ class KalmanFilter(object):
 
         init = kwargs.pop('A', self.eye_init((dim_z, dim_z)))
         self.A = tf.get_variable('A', initializer=init)
-
-        # JTC: Remove B and u
-        init = kwargs.pop('B', self.eye_init((dim_z, dim_u))).astype(np.float32)
-        self.B = tf.get_variable('B', initializer=init)  # control transition matrix
 
         init = kwargs.pop('Q', self.eye_init((dim_z, dim_z))).astype(np.float32)
         self.Q = tf.get_variable('Q', initializer=init, trainable=False)  # process uncertainty
@@ -58,11 +51,6 @@ class KalmanFilter(object):
         if self.y is None:
             self.y = tf.placeholder(tf.float32, shape=(None, None, dim_y), name='y')
 
-        # Remove u
-        self.u = kwargs.pop('u', None)
-        if self.u is None:
-            self.u = tf.placeholder(tf.float32, shape=(None, None, dim_u), name='u')
-
         self.mask = kwargs.pop('mask', None)
         if self.mask is None:
             self.mask = tf.placeholder(tf.float32, shape=(None, None), name='mask')
@@ -78,13 +66,10 @@ class KalmanFilter(object):
         :param inputs: (batch_size, variable dimensions)
         :return:
         """
-        # JTC: Remove u
-        mu_pred, Sigma_pred, _, _, alpha, u, state, buffer, _, _, _ = params
+        mu_pred, Sigma_pred, _, _, alpha, state, buffer, _, _, _ = params
         y = tf.slice(inputs, [0, 0], [-1, self.dim_y])  # (bs, dim_y)
         # JTC: Remove u
-        _u = tf.slice(inputs, [0, self.dim_y], [-1, self.dim_u])  # (bs, dim_u)
-        # JTC: Remove u
-        mask = tf.slice(inputs, [0, self.dim_y + self.dim_u], [-1, 1])  # (bs, dim_u)
+        mask = tf.slice(inputs, [0, self.dim_y], [-1, 1])  # (bs, dim_u)
 
         # Mixture of C
         C = tf.matmul(alpha, tf.reshape(self.C, [-1, self.dim_y*self.dim_z]))  # (bs, k) x (k, dim_y*dim_z)
@@ -110,24 +95,16 @@ class KalmanFilter(object):
         Sigma_t = tf.matmul(tf.matmul(I_KC, Sigma_pred), I_KC, transpose_b=True) + self._sast(self.R, K)  # (bs, dim_z, dim_z)
 
         # Mixture of A
-        # JTC: Remove u
-        alpha, state, u, buffer = self.alpha(tf.multiply(mask, y) + tf.multiply((1-mask), y_pred), state, _u, buffer, reuse=True)  # (bs, k)
+        alpha, state, buffer = self.alpha(tf.multiply(mask, y) + tf.multiply((1-mask), y_pred), state, buffer, reuse=True)  # (bs, k)
         A = tf.matmul(alpha, tf.reshape(self.A, [-1, self.dim_z*self.dim_z]))  # (bs, k) x (k, dim_z*dim_z)
         A = tf.reshape(A, [-1, self.dim_z, self.dim_z])  # (bs, dim_z, dim_z)
         A.set_shape(Sigma_pred.get_shape())  # set shape to batch_size x dim_z x dim_z
 
-        # Mixture of B
-        # JTC: Remove B and u
-        B = tf.matmul(alpha, tf.reshape(self.B, [-1, self.dim_z*self.dim_u]))  # (bs, k) x (k, dim_y*dim_z)
-        B = tf.reshape(B, [-1, self.dim_z, self.dim_u])  # (bs, dim_y, dim_z)
-        B.set_shape([A.get_shape()[0], self.dim_z, self.dim_u])
-
         # Prediction
-        # JTC: Remove B
-        mu_pred = tf.squeeze(tf.matmul(A, tf.expand_dims(mu_t, 2))) + tf.squeeze(tf.matmul(B, tf.expand_dims(u, 2)))
+        mu_pred = tf.squeeze(tf.matmul(A, tf.expand_dims(mu_t, 2)))
         Sigma_pred = tf.scalar_mul(self._alpha_sq, tf.matmul(tf.matmul(A, Sigma_t), A, transpose_b=True) + self.Q)
 
-        return mu_pred, Sigma_pred, mu_t, Sigma_t, alpha, u, state, buffer, A, B, C
+        return mu_pred, Sigma_pred, mu_t, Sigma_t, alpha, state, buffer, A, C
 
     def backward_step_fn(self, params, inputs):
         """
@@ -160,29 +137,23 @@ class KalmanFilter(object):
 
         # To make sure we are not accidentally using the real outputs in the steps with missing values, set them to 0.
         y_masked = tf.multiply(tf.expand_dims(self.mask, 2), self.y)
-        # JTC: remove u
-        inputs = tf.concat([y_masked, self.u, tf.expand_dims(self.mask, 2)], axis=2)
+        inputs = tf.concat([y_masked, tf.expand_dims(self.mask, 2)], axis=2)
 
         y_prev = tf.expand_dims(self.y_0, 0)  # (1, dim_y)
         y_prev = tf.tile(y_prev, (tf.shape(self.mu)[0], 1))
-        # JTC: remove u
-        alpha, state, u, buffer = self.alpha(y_prev, self.state, self.u[:, 0], init_buffer=True, reuse= reuse)
+        alpha, state, buffer = self.alpha(y_prev, self.state, init_buffer=True, reuse= reuse)
 
         # dummy matrix to initialize B and C in scan
         dummy_init_A = tf.ones([self.Sigma.get_shape()[0], self.dim_z, self.dim_z])
-        # JTC: remove B and u
-        dummy_init_B = tf.ones([self.Sigma.get_shape()[0], self.dim_z, self.dim_u])
         dummy_init_C = tf.ones([self.Sigma.get_shape()[0], self.dim_y, self.dim_z])
-        # JTC: remove B and u
         forward_states = tf.scan(self.forward_step_fn, tf.transpose(inputs, [1, 0, 2]),
-                                 initializer=(self.mu, self.Sigma, self.mu, self.Sigma, alpha, u, state, buffer,
-                                              dummy_init_A, dummy_init_B, dummy_init_C),
+                                 initializer=(self.mu, self.Sigma, self.mu, self.Sigma, alpha, state, buffer,
+                                              dummy_init_A, dummy_init_C),
                                  parallel_iterations=1, name='forward')
         return forward_states
 
     def compute_backwards(self, forward_states):
-        # JTC: remove u
-        mu_pred, Sigma_pred, mu_filt, Sigma_filt, alpha, u, state, buffer, A, B, C = forward_states
+        mu_pred, Sigma_pred, mu_filt, Sigma_filt, alpha, state, buffer, A, C = forward_states
         mu_pred = tf.expand_dims(mu_pred, 3)
         mu_filt = tf.expand_dims(mu_filt, 3)
         # The tf.scan below that does the smoothing is initialized with the filtering distribution at time T.
@@ -217,8 +188,7 @@ class KalmanFilter(object):
         # Remove extra dimension in the mean
         backward_states[0] = backward_states[0][:, :, :, 0]
 
-        # JTC: Remove u
-        return backward_states, A, B, C, alpha
+        return backward_states, A, C, alpha
 
     def sample_generative_tf(self, backward_states, n_steps, deterministic=True, init_fixed_steps=1):
         """
@@ -246,8 +216,7 @@ class KalmanFilter(object):
 
         y_prev = tf.expand_dims(self.y_0, 0)  # (1, dim_y)
         y_prev = tf.tile(y_prev, (tf.shape(self.mu)[0], 1))  # (bs, dim_y)
-        # JTC: Remove u
-        alpha, state, u, buffer = self.alpha(y_prev, self.state, self.u[:, 0], reuse=True, init_buffer=True)
+        alpha, state, buffer = self.alpha(y_prev, self.state, reuse=True, init_buffer=True)
 
         y_samples = list()
         z_samples = list()
@@ -267,30 +236,22 @@ class KalmanFilter(object):
             y_samples.append(y)
 
             # Compute the mixture of A
-            # JTC: Remove u
-            alpha, state, u, buffer = self.alpha(y, state, self.u[:, n], buffer, reuse=True)
+            alpha, state, buffer = self.alpha(y, state, buffer, reuse=True)
             alpha_samples.append(alpha)
             A = tf.matmul(alpha, tf.reshape(self.A, [-1, self.dim_z * self.dim_z]))
             A = tf.reshape(A, [-1, self.dim_z, self.dim_z])
 
-            # Mixture of B
-            # JTC: Remove B and u
-            B = tf.matmul(alpha, tf.reshape(self.B, [-1, self.dim_z*self.dim_u]))  # (bs, k) x (k, dim_y*dim_z)
-            B = tf.reshape(B, [-1, self.dim_z, self.dim_u])  # (bs, dim_y, dim_z)
-
             # Get new state z_{t+1}
             # z = tf.matmul(A, z) + tf.matmul(B,  tf.expand_dims(self.u[:, n],2)) + tf.expand_dims(epsilon[:, n], 2)
             if (n + 1) >= init_fixed_steps:
-                # JTC: Remove B and u
-                z = tf.matmul(A, z) + tf.matmul(B,  tf.expand_dims(u, 2)) + tf.expand_dims(epsilon[:, n], 2)
+                z = tf.matmul(A, z) + tf.expand_dims(epsilon[:, n], 2)
             else:
                 z = mu_z[:, n+1]
                 z = tf.expand_dims(z, 2)
 
         return tf.stack(y_samples, 1), tf.stack(z_samples, 1), tf.stack(alpha_samples, 1)
 
-    # JTC: Remove B
-    def get_elbo(self, backward_states, A, B, C):
+    def get_elbo(self, backward_states, A, C):
 
         mu_smooth = backward_states[0]
         Sigma_smooth = backward_states[1]
@@ -308,11 +269,7 @@ class KalmanFilter(object):
         Az_tm1 = tf.reshape(tf.matmul(A[:, :-1], tf.expand_dims(z_smooth[:, :-1], 3)), [-1, self.dim_z])
 
         # Remove the first input as our prior over z_1 does not depend on it
-        # u_t_resh = tf.reshape(u, [-1, self.dim_u])
-        # Bu_t = tf.transpose(tf.matmul(self.B, tf.transpose(u_t_resh)))
-        # JTC: Remove B
-        Bu_t = tf.reshape(tf.matmul(B[:, :-1], tf.expand_dims(self.u[:, 1:], 3)), [-1, self.dim_z])
-        mu_transition = Az_tm1 + Bu_t
+        mu_transition = Az_tm1
         z_t_transition = tf.reshape(z_smooth[:, 1:, :], [-1, self.dim_z])
 
         # MultivariateNormalTriL supports broadcasting only for the inputs, not for the covariance
@@ -357,32 +314,28 @@ class KalmanFilter(object):
         return kf_elbo, log_probs, z_smooth
 
     def filter(self):
-        # JTC: Remove B
-        mu_pred, Sigma_pred, mu_filt, Sigma_filt, alpha, u, state, buffer, A, B, C = forward_states = \
+        mu_pred, Sigma_pred, mu_filt, Sigma_filt, alpha, state, buffer, A, C = forward_states = \
             self.compute_forwards(reuse=True)
         forward_states = [mu_filt, Sigma_filt]
         # Swap batch dimension and time dimension
         forward_states[0] = tf.transpose(forward_states[0], [1, 0, 2])
         forward_states[1] = tf.transpose(forward_states[1], [1, 0, 2, 3])
-        # JTC: Remove B
-        return tuple(forward_states), tf.transpose(A, [1, 0, 2, 3]), tf.transpose(B, [1, 0, 2, 3]), \
+        return tuple(forward_states), tf.transpose(A, [1, 0, 2, 3]), \
                tf.transpose(C, [1, 0, 2, 3]), tf.transpose(alpha, [1, 0, 2])
 
     def smooth(self):
-        # JTC: Remove B
-        backward_states, A, B, C, alpha = self.compute_backwards(self.compute_forwards())
+        backward_states, A, C, alpha = self.compute_backwards(self.compute_forwards())
         # Swap batch dimension and time dimension
         backward_states[0] = tf.transpose(backward_states[0], [1, 0, 2])
         backward_states[1] = tf.transpose(backward_states[1], [1, 0, 2, 3])
-        # JTC: Remove B
-        return tuple(backward_states), tf.transpose(A, [1, 0, 2, 3]), tf.transpose(B, [1, 0, 2, 3]), \
+        return tuple(backward_states), tf.transpose(A, [1, 0, 2, 3]), \
                tf.transpose(C, [1, 0, 2, 3]), tf.transpose(alpha, [1, 0, 2])
 
     def _sast(self, a, s):
         # JTC: Make 1D
-        _, dim_1, dim_2 = s.get_shape().as_list()
-        sast = tf.matmul(tf.reshape(s, [-1, dim_2]), a, transpose_b=True)
-        sast = tf.transpose(tf.reshape(sast, [-1, dim_1, dim_2]), [0, 2, 1])
+        _, emb_dim = s.get_shape().as_list()
+        sast = tf.matmul(tf.reshape(s, [-1, emb_dim]), a, transpose_b=True)
+        sast = tf.transpose(tf.reshape(sast, [-1, emb_dim]), [0, 2, 1])
         sast = tf.matmul(s, sast)
         return sast
 

@@ -1,14 +1,7 @@
 from tensorflow.contrib import slim
 from tensorflow.contrib.layers import optimize_loss
 from .filter import KalmanFilter
-# JTC: We don't need this
-from .utils.movie import save_frames, save_movies_to_frame, save_true_generated_frames, save_movie_to_frame
-# JTC: Delete movie specific stuff
-from .utils.plotting import (plot_auxiliary, plot_alpha_grid, plot_ball_trajectories, plot_trajectory_and_video,
-                                 plot_3d_ball_trajectory, plot_ball_trajectories_comparison,
-                                 plot_ball_and_alpha, plot_ball_trajectory, plot_alpha)
-# JTC: We don't need pymunkdata, can remove this
-from .utils.data import PymunkData
+from .utils.plotting import (plot_auxiliary, plot_alpha_grid)
 from .utils.nn import *
 from tensorflow.contrib.rnn import BasicLSTMCell
 
@@ -27,25 +20,18 @@ np.random.seed(1337)
 class KalmanVariationalAutoencoder(object):
     """ This class defines functions to build, train and evaluate Kalman Variational Autoencoders
     """
-    def __init__(self, config, sess):
+    def __init__(self, train_data, test_data, config, sess):
         self.config = config
 
-        # JTC: The data structures for our data will be different
-        # JTC: Size of data should be (sequences, timesteps, emb_size)
         # Load the dataset
-        self.train_data = PymunkData("../data/{}.npz".format(config.dataset), config)
-        self.test_data = PymunkData("../data/{}_test.npz".format(config.dataset), config)
-
-        # JTC: We have 1D data, not 2D
-        # Frame sizes
-        self.d1 = self.train_data.d1
-        self.d2 = self.train_data.d2
+        self.train_data = train_data
+        self.train_n_sequences, self.train_n_timesteps, self.emb_dim = train_data.shape
+        self.test_data = test_data
+        self.test_n_sequences, self.test_n_timesteps, test_emb_dim = test_data.shape
+        assert self.emb_dim != test_emb_dim
 
         # Initializers for LGSSM variables. A is intialized with identity matrices, B and C randomly from a gaussian
         A = np.array([np.eye(config.dim_z).astype(np.float32) for _ in range(config.K)])
-        # JTC: Remove B
-        B = np.array([config.init_kf_matrices * np.random.randn(config.dim_z, config.dim_u).astype(np.float32)
-                      for _ in range(config.K)])
         C = np.array([config.init_kf_matrices * np.random.randn(config.dim_a, config.dim_z).astype(np.float32)
                       for _ in range(config.K)])
         # We use isotropic covariance matrices
@@ -60,8 +46,7 @@ class KalmanVariationalAutoencoder(object):
         a_0 = np.zeros((config.dim_a,), dtype=np.float32)
 
         # Collect initial variables
-        # JTC: Remove B
-        self.init_vars = dict(A=A, B=B, C=C, Q=Q, R=R, mu=mu, Sigma=Sigma, a_0=a_0)
+        self.init_vars = dict(A=A, C=C, Q=Q, R=R, mu=mu, Sigma=Sigma, a_0=a_0)
 
         # Get activation function for hidden layers
         if config.activation.lower() == 'relu':
@@ -109,24 +94,8 @@ class KalmanVariationalAutoencoder(object):
         :return: a, a_mu, a_var
         """
         with tf.variable_scope('vae/encoder'):
-            # JTC: We won't be using convs so can remove this
-            if self.config.conv:
-                x_flat_conv = tf.reshape(x, (-1, self.d1, self.d2, 1))
-                enc_hidden = slim.stack(x_flat_conv,
-                                        slim.conv2d,
-                                        self.num_filters,
-                                        kernel_size=self.config.filter_size,
-                                        stride=2,
-                                        activation_fn=self.activation_fn,
-                                        padding='SAME')
-                enc_flat = slim.flatten(enc_hidden)
-                self.enc_shape = enc_hidden.get_shape().as_list()[1:]
-
-            else:
-                # JTC: Don't need to reshape
-                x_flat = tf.reshape(x, (-1, self.d1 * self.d2))
-                enc_flat = slim.repeat(x_flat, self.config.num_layers, slim.fully_connected,
-                                       self.config.vae_num_units, self.activation_fn)
+            enc_flat = slim.repeat(x, self.config.num_layers, slim.fully_connected,
+                                   self.config.vae_num_units, self.activation_fn)
 
             a_mu = slim.fully_connected(enc_flat, self.config.dim_a, activation_fn=None)
             if self.config.use_vae:
@@ -153,29 +122,14 @@ class KalmanVariationalAutoencoder(object):
 
         with tf.variable_scope('vae/decoder'):
             a = tf.reshape(a_seq, (-1, self.config.dim_a))
-            if self.config.conv:
-                dec_upscale = slim.fully_connected(a, int(np.prod(self.enc_shape)), activation_fn=None)
-                dec_upscale = tf.reshape(dec_upscale, [-1] + self.enc_shape)
+            dec_hidden = slim.repeat(a, self.config.num_layers, slim.fully_connected,
+                                     self.config.vae_num_units, self.activation_fn)
 
-                dec_hidden = dec_upscale
-                for filters in reversed(self.num_filters):
-                    # JTC: We'll have to change this to work for flat embeddings
-                    dec_hidden = slim.conv2d(dec_hidden, filters * 4, self.config.filter_size,
-                                             activation_fn=self.activation_fn)
-                    dec_hidden = subpixel_reshape(dec_hidden, 2)
-                x_mu = slim.conv2d(dec_hidden, 1, 1, stride=1, activation_fn=activation_x_mu)
-                x_var = tf.constant(self.config.noise_pixel_var, dtype=tf.float32, shape=())
-            else:
-                dec_hidden = slim.repeat(a, self.config.num_layers, slim.fully_connected,
-                                         self.config.vae_num_units, self.activation_fn)
-
-                # JTC: Change to flat embedding size
-                x_mu = slim.fully_connected(dec_hidden, self.d1 * self.d2, activation_fn=activation_x_mu)
-                x_mu = tf.reshape(x_mu, (-1, self.d1, self.d2, 1))
-                # x_var is not used for bernoulli outputs. Here we fix the output variance of the Gaussian,
-                # we could also learn it globally for each pixel (as we did in the pendulum experiment) or through a
-                # neural network.
-                x_var = tf.constant(self.config.noise_pixel_var, dtype=tf.float32, shape=())
+            x_mu = slim.fully_connected(dec_hidden, self.emb_dim, activation_fn=activation_x_mu)
+            # x_var is not used for bernoulli outputs. Here we fix the output variance of the Gaussian,
+            # we could also learn it globally for each pixel (as we did in the pendulum experiment) or through a
+            # neural network.
+            x_var = tf.constant(self.config.noise_pixel_var, dtype=tf.float32, shape=())
 
         if self.config.out_distr == 'bernoulli':
             # For bernoulli we show the probabilities
@@ -185,14 +139,13 @@ class KalmanVariationalAutoencoder(object):
 
         return tf.reshape(x_hat, tf.stack((-1, self.ph_steps, self.d1, self.d2))), x_mu, x_var
 
-    def alpha(self, inputs, state=None, u=None, buffer=None, reuse=None, init_buffer=False, name='alpha'):
+    def alpha(self, inputs, state=None, buffer=None, reuse=None, init_buffer=False, name='alpha'):
         """The dynamics parameter network alpha for mixing transitions in a state space model.
         This function is quite general and supports different architectures (NN, RNN, FIFO queue, learning the inputs)
 
         Args:
             inputs: tensor to condition mixing vector on
             state: previous state if using RNN network to model alpha
-            u: pass-through variable if u is given (learn_u=False)
             buffer: buffer for the FIFO network (used for fifo_size>1)
             reuse: `True` or `None`; if `True`, we go into reuse mode for this scope as
                     well as all sub-scopes; if `None`, we just inherit the parent scope reuse.
@@ -205,9 +158,7 @@ class KalmanVariationalAutoencoder(object):
             u: either inferred u from model or pass-through
             buffer: FIFO buffer
         """
-        # JTC: Remove input u
-        # Increase the number of hidden units if we also learn u (learn_u=True)
-        num_units = self.config.alpha_units * 2 if self.config.learn_u else self.config.alpha_units
+        num_units = self.config.alpha_units
 
         # Overwrite input buffer
         if init_buffer:
@@ -215,7 +166,7 @@ class KalmanVariationalAutoencoder(object):
 
         # If K == 1, return inputs
         if self.config.K == 1:
-            return tf.ones([self.config.batch_size, self.config.K]), state, u, buffer
+            return tf.ones([self.config.batch_size, self.config.K]), state, buffer
 
         with tf.variable_scope(name, reuse=reuse):
             if self.config.alpha_rnn:
@@ -235,13 +186,7 @@ class KalmanVariationalAutoencoder(object):
                                          activation_fn=tf.nn.softmax,
                                          scope='alpha_var')
 
-            # JTC: Remove input u
-            if self.config.learn_u:
-                # Get U as the second half of the output
-                u = slim.fully_connected(output[:, self.config.alpha_units:],
-                                         self.config.dim_u, activation_fn=None, scope='u_var')
-                # JTC: Remove input u
-        return alpha, state, u, buffer
+        return alpha, state, buffer
 
     def build_model(self):
         # Encoder q(a|x)
@@ -249,19 +194,14 @@ class KalmanVariationalAutoencoder(object):
         a_vae = a_seq
 
         # Initial state for the alpha RNN
-        # JTC: Remove input u
-        dummy_lstm = BasicLSTMCell(self.config.alpha_units * 2 if self.config.learn_u else self.config.alpha_units)
+        dummy_lstm = BasicLSTMCell(self.config.alpha_units)
         state_init_rnn = dummy_lstm.zero_state(self.config.batch_size, tf.float32)
 
         # Initialize Kalman filter (LGSSM)
         self.kf = KalmanFilter(dim_z=self.config.dim_z,
                                dim_y=self.config.dim_a,
-                               # JTC: Remove input u
-                               dim_u=self.config.dim_u,
                                dim_k=self.config.K,
                                A=self.init_vars['A'],  # state transition function
-                               # JTC: Remove B
-                               B=self.init_vars['B'],  # control matrix
                                C=self.init_vars['C'],  # Measurement function
                                R=self.init_vars['R'],  # measurement noise
                                Q=self.init_vars['Q'],  # process noise
@@ -276,8 +216,7 @@ class KalmanVariationalAutoencoder(object):
                                )
 
         # Get smoothed posterior over z
-        # JTC: Remove B
-        smooth, A, B, C, alpha_plot = self.kf.smooth()
+        smooth, A, C, alpha_plot = self.kf.smooth()
 
         # Get filtered posterior, used only for imputation plots
         filter, _, _, C_filter, _ = self.kf.filter()
@@ -297,31 +236,26 @@ class KalmanVariationalAutoencoder(object):
                                                         init_fixed_steps=self.config.t_init_mask)
         self.out_gen = self.kf.sample_generative_tf(smooth, self.n_steps_gen, deterministic=False,
                                                     init_fixed_steps=self.config.t_init_mask)
-        # JTC: Revamp test_data object
-        self.out_gen_det_impute = self.kf.sample_generative_tf(smooth, self.test_data.timesteps, deterministic=True,
+        self.out_gen_det_impute = self.kf.sample_generative_tf(smooth, self.test_n_timesteps, deterministic=True,
                                                                init_fixed_steps=self.config.t_init_mask)
-        self.out_alpha, _, _, _ = self.alpha(self.a_prev, state=state_init_rnn, u=None, init_buffer=True, reuse=True)
+        self.out_alpha, _, _, _ = self.alpha(self.a_prev, state=state_init_rnn, init_buffer=True, reuse=True)
 
         # Collect generated model variables
         self.model_vars = dict(x_hat=x_hat, x_mu=x_mu, x_var=x_var,
                                a_seq=a_seq, a_mu=a_mu, a_var=a_var, a_vae=a_vae,
-                               # JTC: Remove B
-                               smooth=smooth, A=A, B=B, C=C, alpha_plot=alpha_plot,
+                               smooth=smooth, A=A, C=C, alpha_plot=alpha_plot,
                                a_mu_pred_seq=a_mu_pred_seq, filter=filter, C_filter=C_filter)
 
         return self
 
     def build_loss(self):
         # Reshape x for log_likelihood
-        # JTC: Adjust for flat embedding size
-        x_flat = tf.reshape(self.x, (-1, self.d1 * self.d2))
-        x_mu_flat = tf.reshape(self.model_vars['x_mu'], (-1, self.d1 * self.d2))
         mask_flat = tf.reshape(self.mask, (-1,))
 
         # VAE loss
-        elbo_vae, log_px, log_qa = log_likelihood(x_mu_flat,
+        elbo_vae, log_px, log_qa = log_likelihood(self.model_vars['x_mu'],
                                                   self.model_vars['x_var'],
-                                                  x_flat,
+                                                  self.x,
                                                   self.model_vars['a_mu'],
                                                   self.model_vars['a_var'],
                                                   tf.reshape(self.model_vars['a_vae'], (-1, self.config.dim_a)),
@@ -330,13 +264,10 @@ class KalmanVariationalAutoencoder(object):
         # LGSSM loss
         elbo_kf, kf_log_probs, z_smooth = self.kf.get_elbo(self.model_vars['smooth'],
                                                            self.model_vars['A'],
-                                                           # JTC: Remove B
-                                                           self.model_vars['B'],
                                                            self.model_vars['C'])
 
         # Calc number of batches
-        # JTC: Revamp train_data object
-        num_batches = self.train_data.sequences // self.config.batch_size
+        num_batches = self.train_n_sequences // self.config.batch_size
 
         # Decreasing learning rate
         global_step = tf.contrib.framework.get_or_create_global_step()
@@ -352,8 +283,7 @@ class KalmanVariationalAutoencoder(object):
 
         # Get list of vars for gradient computation
         vae_vars = slim.get_variables('vae')
-        # JTC: Remove B
-        kf_vars = [self.kf.A, self.kf.B, self.kf.C, self.kf.y_0]
+        kf_vars = [self.kf.A, self.kf.C, self.kf.y_0]
         all_vars = tf.trainable_variables()
 
         # Define training updates
@@ -409,11 +339,9 @@ class KalmanVariationalAutoencoder(object):
         """
         sess = self.sess
         writer = tf.summary.FileWriter(self.config.log_dir, sess.graph)
-        # JTC: Revamp train_data object
-        num_batches = self.train_data.sequences // self.config.batch_size
+        num_batches = self.train_n_sequences // self.config.batch_size
         # This code supports training with missing data (if train_miss_prob > 0.0)
-        # JTC: Revamp train_data object
-        mask_train = np.ones((num_batches, self.config.batch_size, self.train_data.timesteps), dtype=np.float32)
+        mask_train = np.ones((num_batches, self.config.batch_size, self.train_n_timesteps), dtype=np.float32)
         if self.config.train_miss_prob > 0.0:
             # Always use the same mask for each sequence during training
             for j in range(num_batches):
@@ -431,13 +359,9 @@ class KalmanVariationalAutoencoder(object):
             time_epoch_start = time.time()
             for i in range(num_batches):
                 slc = slice(i * self.config.batch_size, (i + 1) * self.config.batch_size)
-                # JTC: Revamp train_data object
-                feed_dict = {self.x: self.train_data.images[slc],
-                             # JTC: Remove input
-                             self.kf.u: self.train_data.controls[slc],
+                feed_dict = {self.x: self.train_data[slc],
                              self.mask: mask_train[i],
-                             # JTC: Revamp train_data object
-                             self.ph_steps: self.train_data.timesteps,
+                             self.ph_steps: self.train_n_timesteps,
                              self.scale_reconstruction: self.config.scale_reconstruction}
 
                 # Support for different updates schemes. It is beneficial to achieve better convergence not to train
@@ -490,8 +414,7 @@ class KalmanVariationalAutoencoder(object):
         return out_res[0]
 
     def test(self):
-        # JTC: Revamp test_data object
-        mask_test = np.ones((self.config.batch_size, self.test_data.timesteps), dtype=np.float32)
+        mask_test = np.ones((self.config.batch_size, self.test_n_timesteps), dtype=np.float32)
 
         elbo_tot = []
         elbo_kf = []
@@ -500,15 +423,11 @@ class KalmanVariationalAutoencoder(object):
         log_px = []
         log_qa = []
         time_test_start = time.time()
-        # JTC: Revamp test_data object
-        for i in range(self.test_data.sequences // self.config.batch_size):
+        for i in range(self.test_n_sequences // self.config.batch_size):
             slc = slice(i * self.config.batch_size, (i + 1) * self.config.batch_size)
-            # JTC: Revamp test_data object
-            feed_dict = {self.x: self.test_data.images[slc],
-                         # JTC: Revamp test_data object
-                         self.kf.u: self.test_data.controls[slc],
+            feed_dict = {self.x: self.test_data[slc],
                          self.mask: mask_test,
-                         self.ph_steps: self.test_data.timesteps,
+                         self.ph_steps: self.test_n_timesteps,
                          self.scale_reconstruction: 1.0}
 
             # Bookkeeping.
@@ -532,52 +451,29 @@ class KalmanVariationalAutoencoder(object):
     def generate(self, idx_batch=0, n=99999):
         ###### Sample video deterministic ######
         # Get initial state z_1
-        # JTC: Revamp test_data object
-        mask_test = np.ones((self.config.batch_size, self.test_data.timesteps), dtype=np.float32)
-        # JTC: Revamp test_data object
+        mask_test = np.ones((self.config.batch_size, self.test_n_timesteps), dtype=np.float32)
         slc = slice(idx_batch * self.config.batch_size, (idx_batch + 1) * self.config.batch_size)
-        # JTC: Revamp test_data object
-        feed_dict = {self.x: self.test_data.images[slc],
-                     # JTC: Remove input u
-                     self.kf.u: self.test_data.controls[slc],
-                     self.ph_steps: self.test_data.timesteps,
+        feed_dict = {self.x: self.test_data[slc],
+                     self.ph_steps: self.test_n_timesteps,
                      self.mask: mask_test}
         smooth_z = self.sess.run(self.model_vars['smooth'], feed_dict)
 
         # Sample deterministic generation
         feed_dict = {self.model_vars['smooth']: smooth_z,
-                     # JTC: Remove input u
-                     self.kf.u: np.zeros((self.config.batch_size, self.n_steps_gen, self.config.dim_u)),
                      self.ph_steps: self.n_steps_gen}
         a_gen_det, _, alpha_gen_det = self.sess.run(self.out_gen_det, feed_dict)
         x_gen_det = self.sess.run(self.model_vars['x_hat'], {self.model_vars['a_seq']: a_gen_det,
                                                              self.ph_steps: self.n_steps_gen})
 
         # Save the trajectory of deterministic a (we only plot the first 2 dimensions!) and alpha
-        # JTC: Replace this visualization with one that makes more sense for us
-        plot_ball_trajectories(a_gen_det, self.config.log_dir + '/plot_generation_det_%05d.png' % n)
-        # JTC: This one is fine though
         plot_alpha_grid(alpha_gen_det, self.config.log_dir + '/alpha_generation_det_%05d.png' % n)
 
         # Sample stochastic
         a_gen, _, alpha_gen = self.sess.run(self.out_gen, feed_dict)
         x_gen = self.sess.run(self.model_vars['x_hat'], {self.model_vars['a_seq']: a_gen,
                                                          self.ph_steps: self.n_steps_gen})
-
-        # Save movies
-        # JTC: Replace this visualization with one that makes more sense for us
-        save_frames(x_gen, self.config.log_dir + '/video_generation_%05d.mp4' % n)
-        save_frames(x_gen_det, self.config.log_dir + '/video_generation_det_%05d.mp4' % n)
-
         # Save stochastic a and alpha
-        # JTC: Replace this visualization with one that makes more sense for us
-        plot_ball_trajectories(a_gen, self.config.log_dir + '/plot_generation_%05d.png' % n)
-        # JTC: This one is fine though
         plot_alpha_grid(alpha_gen, self.config.log_dir + '/alpha_generation_%05d.png' % n)
-
-        # Save movie to single frame
-        # JTC: Replace this visualization with one that makes more sense for us
-        save_movies_to_frame(x_gen_det[:, :20], self.config.log_dir + '/video_generation_image_%05d.png' % n)
 
         # We can only show the image for alpha when using a simple neural network
         if self.config.dim_a == 2 and self.config.fifo_size == 1 and self.config.alpha_rnn == False \
@@ -585,12 +481,9 @@ class KalmanVariationalAutoencoder(object):
             self.img_alpha_nn(n=n, range_x=(-16, 16), range_y=(-16, 16))
 
     def impute(self, mask_impute, t_init_mask, idx_batch=0, n=99999, plot=True):
-        # JTC: Revamp test_data object
         slc = slice(idx_batch * self.config.batch_size, (idx_batch + 1) * self.config.batch_size)
-        feed_dict = {self.x: self.test_data.images[slc],
-                     # JTC: Remove u
-                     self.kf.u: self.test_data.controls[slc],
-                     self.ph_steps: self.test_data.timesteps,
+        feed_dict = {self.x: self.test_data[slc],
+                     self.ph_steps: self.test_n_timesteps,
                      self.mask: mask_impute}
 
         # JTC: This is using straight up tensorflow run to compute variables
@@ -606,61 +499,37 @@ class KalmanVariationalAutoencoder(object):
                                                                                      self.model_vars['C_filter']],
                                                                                     feed_dict)
         x_imputed = self.sess.run(self.model_vars['x_hat'], {self.model_vars['a_seq']: a_imputed,
-                                                             self.ph_steps: self.test_data.timesteps})
+                                                             self.ph_steps: self.test_n_timesteps})
         x_true = feed_dict[self.x]
 
         ###### Filtering
         feed_dict = {self.model_vars['smooth']: filter_z,
                      self.model_vars['C']: C_filter,
-                     self.ph_steps: self.test_data.timesteps}
+                     self.ph_steps: self.test_n_timesteps}
         a_filtered = self.sess.run(self.model_vars['a_mu_pred_seq'], feed_dict)
         x_filtered = self.sess.run(self.model_vars['x_hat'], {self.model_vars['a_seq']: a_filtered,
-                                                              self.ph_steps: self.test_data.timesteps})
+                                                              self.ph_steps: self.test_n_timesteps})
         if plot:
-            # JTC: Replace these visualizations with something more appropriate
-            save_frames(x_true, self.config.log_dir + '/video_true.mp4')
-            save_frames(x_imputed, self.config.log_dir + '/video_smoothing_%05d.mp4' % n)
-            save_frames(x_reconstr, self.config.log_dir + '/video_reconstruction_%05d.mp4' % n)
-            save_true_generated_frames(x_true, x_imputed, self.config.log_dir + '/video_true_smooth_%05d.mp4' % n)
-            save_true_generated_frames(x_true, x_filtered, self.config.log_dir + '/video_true_filter_%05d.mp4' % n)
-            save_true_generated_frames(x_true, x_reconstr, self.config.log_dir + '/video_true_recon_%05d.mp4' % n)
-
             plot_alpha_grid(alpha_reconstr, self.config.log_dir + '/alpha_reconstr_%05d.png' % n)
 
             # Plot z_mu
             plot_auxiliary([smooth_z[0]], self.config.log_dir + '/plot_z_mu_smooth_%05d.png' % n)
 
-            if self.config.dim_a == 2:
-                # Plot alpha and corresponding trajectory
-                plot_ball_and_alpha(alpha_reconstr[14], a_reconstr[14], cmap='Reds',
-                                    filename=self.config.log_dir + '/alpha_a_recon_%05d.png' % n)
-
         ###### Sample deterministic generation having access to the first t_init_mask frames for comparison
         # Get initial state z_1
-        feed_dict = {self.x: self.test_data.images[slc][:, 0: t_init_mask],
-                     # JTC: Remove input u
-                     self.kf.u: self.test_data.controls[slc][:, 0: t_init_mask],
+        feed_dict = {self.x: self.test_data[slc][:, 0: t_init_mask],
                      self.ph_steps: t_init_mask,
                      self.mask: mask_impute[:, 0: t_init_mask]}
         smooth_z_gen = self.sess.run(self.model_vars['smooth'], feed_dict)
         feed_dict = {self.model_vars['smooth']: smooth_z_gen,
-                     # JTC: Remove input u
-                     self.kf.u: np.zeros((self.config.batch_size, self.n_steps_gen, self.config.dim_u)),
-                     self.ph_steps: self.test_data.timesteps}
+                     self.ph_steps: self.test_n_timesteps}
         a_gen_det, _, alpha_gen_det = self.sess.run(self.out_gen_det_impute, feed_dict)
         x_gen_det = self.sess.run(self.model_vars['x_hat'], {self.model_vars['a_seq']: a_gen_det,
-                                                             self.ph_steps: self.test_data.timesteps})
+                                                             self.ph_steps: self.test_n_timesteps})
 
         if plot:
-            # JTC: Replace these visualizations with something more appropriate
-            save_true_generated_frames(x_true, x_gen_det, self.config.log_dir + '/video_true_gen_%05d.mp4' % n)
-            if self.config.dim_a == 2:
-                plot_ball_trajectories_comparison(a_reconstr, a_gen_det, a_imputed,
-                                                  self.config.log_dir + '/plot_imputation_%05d.png' % n,
-                                                  nrows=4, ncols=4, mask=mask_impute)
-            else:
-                plot_auxiliary([a_reconstr, a_gen_det, a_imputed],
-                               self.config.log_dir + '/plot_imputation_%05d.png' % n)
+            plot_auxiliary([a_reconstr, a_gen_det, a_imputed],
+                           self.config.log_dir + '/plot_imputation_%05d.png' % n)
 
         # For a more fair comparison against pure generation only look at time steps with no observed variables
         mask_unobs = mask_impute < 0.5
@@ -730,7 +599,7 @@ class KalmanVariationalAutoencoder(object):
         :param t_steps_mask: observed steps in the end
         :return: np.ndarray
         """
-        mask_impute = np.ones((self.config.batch_size, self.test_data.timesteps), dtype=np.float32)
+        mask_impute = np.ones((self.config.batch_size, self.test_n_timesteps), dtype=np.float32)
         t_end_mask = t_init_mask + t_steps_mask
         mask_impute[:, t_init_mask: t_end_mask] = 0.0
         return mask_impute
@@ -741,9 +610,9 @@ class KalmanVariationalAutoencoder(object):
         :param drop_prob: probability of not observing a step
         :return: np.ndarray
         """
-        mask_impute = np.ones((self.config.batch_size, self.test_data.timesteps), dtype=np.float32)
+        mask_impute = np.ones((self.config.batch_size, self.test_n_timesteps), dtype=np.float32)
 
-        n_steps = self.test_data.timesteps - t_init_mask
+        n_steps = self.test_n_timesteps - t_init_mask
         mask_impute[:, t_init_mask:] = np.random.choice([0, 1], size=(self.config.batch_size, n_steps),
                                                                    p=[drop_prob, 1.0 - drop_prob])
         return mask_impute
@@ -757,7 +626,7 @@ class KalmanVariationalAutoencoder(object):
         :return: average of imputation errors
         """
         results = []
-        for i in range(self.test_data.sequences // self.config.batch_size):
+        for i in range(self.test_n_sequences // self.config.batch_size):
             results.append(self.impute(mask_impute, t_init_mask=t_init_mask, idx_batch=i, n=n, plot=plot))
         return np.array(results).mean(axis=0)
 

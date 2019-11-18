@@ -19,20 +19,18 @@ def reload_config(FLAGS):
 
 
 # JTC: can change this to not "image"
-def get_image_config():
+def get_train_config():
     cl = tf.app.flags
 
     # Choose data set
-    cl.DEFINE_string('dataset', 'box', 'Select data set') # 'box_rnd', 'box_gravity', 'polygon' or 'pong'
+    # JTC: Change these default paths
+    cl.DEFINE_string('train_data', '', 'Select data set') # 'box_rnd', 'box_gravity', 'polygon' or 'pong'
+    cl.DEFINE_string('test_data', '', 'Select data set') # 'box_rnd', 'box_gravity', 'polygon' or 'pong'
 
     # VAE config
     cl.DEFINE_string('out_distr', 'bernoulli', 'Output distibution')
-    # JTC: Since we're using 1D embeddings, doesn't really make sense to use conv layers... can probably remove this and set to False
-    cl.DEFINE_boolean('conv', True, 'Use conv vae')
     cl.DEFINE_string('activation', 'relu', 'Activation function in VAE')
     cl.DEFINE_integer('filter_size', 3, 'Filter size in conv vae')
-    # JTC: Since we're using 1D embeddings, doesn't really make sense to use conv layers... can probably remove this and set to False
-    cl.DEFINE_string('num_filters', '32,32,32', 'Comma separated list of conv filters')
     cl.DEFINE_integer('vae_num_units', 25, 'Number of hidden units in the VAE (if conv=False)')
     cl.DEFINE_integer('num_layers', 2, 'Number of layers in VAE (if conv=False)')
     cl.DEFINE_float('noise_pixel_var', 0.1, 'Noise variance for the pixels in the image if out_distr=gaussian')
@@ -42,8 +40,6 @@ def get_image_config():
     # LGSSM config
     cl.DEFINE_integer('dim_a', 2, 'Number of latent variables in the VAE')
     cl.DEFINE_integer('dim_z', 4, 'Dimension of the latent state in the LGSSM')
-    # JTC: Set to 0 since we aren't using inputs
-    cl.DEFINE_integer('dim_u', 1, 'Dimension of the inputs')
     cl.DEFINE_integer('K', 3, 'Number of filters in mixture')
     cl.DEFINE_float('noise_emission', 0.03, 'Noise level for the measurement noise matrix')
     cl.DEFINE_float('noise_transition', 0.08, 'Noise level for the process noise matrix')
@@ -55,7 +51,6 @@ def get_image_config():
     cl.DEFINE_integer('alpha_layers', 2, 'Number of layers in alpha network (if alpha_rnn=False)')
     cl.DEFINE_string('alpha_activation', 'relu', 'Activation function in alpha (if alpha_rnn=False)')
     cl.DEFINE_integer('fifo_size', 1, 'Number of items in the alpha FIFO memory (if alpha_rnn=False)')
-    cl.DEFINE_boolean('learn_u', False, 'Model u from a neural network')
 
     # Training config
     cl.DEFINE_integer('batch_size', 32, 'Size of mini batches')
@@ -90,7 +85,7 @@ def get_image_config():
 
 
 if __name__ == '__main__':
-    config = get_image_config()
+    config = get_train_config()
     config.DEFINE_bool('test', True, 'test')
     config = reload_config(config.FLAGS)
 
