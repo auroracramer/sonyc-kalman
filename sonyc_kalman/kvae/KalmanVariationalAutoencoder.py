@@ -28,7 +28,7 @@ class KalmanVariationalAutoencoder(object):
         self.train_n_sequences, self.train_n_timesteps, self.emb_dim = train_data.shape
         self.test_data = test_data
         self.test_n_sequences, self.test_n_timesteps, test_emb_dim = test_data.shape
-        assert self.emb_dim != test_emb_dim
+        assert self.emb_dim == test_emb_dim
 
         # Initializers for LGSSM variables. A is intialized with identity matrices, B and C randomly from a gaussian
         A = np.array([np.eye(config.dim_z).astype(np.float32) for _ in range(config.K)])
@@ -58,14 +58,11 @@ class KalmanVariationalAutoencoder(object):
         else:
             self.activation_fn = None
 
-        # Parse num_filters to list of ints
-        self.num_filters = [int(f) for f in config.num_filters.split(',')]
-
         # Set Tensorflow session
         self.sess = sess
 
         # Init placeholders
-        self.x = tf.placeholder(tf.float32, shape=[None, None, self.d1, self.d2], name='x')
+        self.x = tf.placeholder(tf.float32, shape=[None, None, self.emb_dim], name='x')
         self.ph_steps = tf.placeholder(tf.int32, shape=(), name='n_step')
         self.scale_reconstruction = tf.placeholder(tf.float32, shape=(), name='scale_reconstruction')
         self.mask = tf.placeholder(tf.float32, shape=(None, None), name='mask')
@@ -88,13 +85,14 @@ class KalmanVariationalAutoencoder(object):
         self.test_summary = None
 
     def encoder(self, x):
-        """ Convolutional variational encoder to encode image into a low-dimensional latent code
-        If config.conv == False it is a MLP VAE. If config.use_vae == False, it is a normal encoder
+        """ Variational encoder to encode image into a low-dimensional latent code
+        If config.use_vae == False, it is a normal encoder
         :param x: sequence of images
         :return: a, a_mu, a_var
         """
         with tf.variable_scope('vae/encoder'):
-            enc_flat = slim.repeat(x, self.config.num_layers, slim.fully_connected,
+            x_flat = tf.reshape(x, (-1, self.emb_dim))
+            enc_flat = slim.repeat(x_flat, self.config.num_layers, slim.fully_connected,
                                    self.config.vae_num_units, self.activation_fn)
 
             a_mu = slim.fully_connected(enc_flat, self.config.dim_a, activation_fn=None)
@@ -109,8 +107,8 @@ class KalmanVariationalAutoencoder(object):
         return a_seq, a_mu, a_var
 
     def decoder(self, a_seq):
-        """ Convolutional variational decoder to decode latent code to image reconstruction
-        If config.conv == False it is a MLP VAE. If config.use_vae == False it is a normal decoder
+        """ Variational decoder to decode latent code to image reconstruction
+        If config.use_vae == False it is a normal decoder
         :param a_seq: latent code
         :return: x_hat, x_mu, x_var
         """
@@ -126,10 +124,11 @@ class KalmanVariationalAutoencoder(object):
                                      self.config.vae_num_units, self.activation_fn)
 
             x_mu = slim.fully_connected(dec_hidden, self.emb_dim, activation_fn=activation_x_mu)
+            x_mu = tf.reshape(x_mu, (-1, self.emb_dim, 1))
             # x_var is not used for bernoulli outputs. Here we fix the output variance of the Gaussian,
             # we could also learn it globally for each pixel (as we did in the pendulum experiment) or through a
             # neural network.
-            x_var = tf.constant(self.config.noise_pixel_var, dtype=tf.float32, shape=())
+            x_var = tf.constant(self.config.noise_var, dtype=tf.float32, shape=())
 
         if self.config.out_distr == 'bernoulli':
             # For bernoulli we show the probabilities
@@ -137,7 +136,7 @@ class KalmanVariationalAutoencoder(object):
         else:
             x_hat = simple_sample(x_mu, x_var)
 
-        return tf.reshape(x_hat, tf.stack((-1, self.ph_steps, self.d1, self.d2))), x_mu, x_var
+        return tf.reshape(x_hat, tf.stack((-1, self.ph_steps, self.emb_dim))), x_mu, x_var
 
     def alpha(self, inputs, state=None, buffer=None, reuse=None, init_buffer=False, name='alpha'):
         """The dynamics parameter network alpha for mixing transitions in a state space model.
@@ -219,7 +218,7 @@ class KalmanVariationalAutoencoder(object):
         smooth, A, C, alpha_plot = self.kf.smooth()
 
         # Get filtered posterior, used only for imputation plots
-        filter, _, _, C_filter, _ = self.kf.filter()
+        filter, _, C_filter, _ = self.kf.filter()
 
         # Get a from the prior z (for plotting)
         a_mu_pred = tf.matmul(C, tf.expand_dims(smooth[0], 2), transpose_b=True)
@@ -238,7 +237,7 @@ class KalmanVariationalAutoencoder(object):
                                                     init_fixed_steps=self.config.t_init_mask)
         self.out_gen_det_impute = self.kf.sample_generative_tf(smooth, self.test_n_timesteps, deterministic=True,
                                                                init_fixed_steps=self.config.t_init_mask)
-        self.out_alpha, _, _, _ = self.alpha(self.a_prev, state=state_init_rnn, init_buffer=True, reuse=True)
+        self.out_alpha, _, _ = self.alpha(self.a_prev, state=state_init_rnn, init_buffer=True, reuse=True)
 
         # Collect generated model variables
         self.model_vars = dict(x_hat=x_hat, x_mu=x_mu, x_var=x_var,
@@ -250,12 +249,14 @@ class KalmanVariationalAutoencoder(object):
 
     def build_loss(self):
         # Reshape x for log_likelihood
+        x_flat = tf.reshape(self.x, (-1, self.emb_dim))
+        x_mu_flat = tf.reshape(self.model_vars['x_mu'], (-1, self.emb_dim))
         mask_flat = tf.reshape(self.mask, (-1,))
 
         # VAE loss
-        elbo_vae, log_px, log_qa = log_likelihood(self.model_vars['x_mu'],
+        elbo_vae, log_px, log_qa = log_likelihood(x_mu_flat,
                                                   self.model_vars['x_var'],
-                                                  self.x,
+                                                  x_flat,
                                                   self.model_vars['a_mu'],
                                                   self.model_vars['a_var'],
                                                   tf.reshape(self.model_vars['a_vae'], (-1, self.config.dim_a)),
@@ -563,7 +564,7 @@ class KalmanVariationalAutoencoder(object):
 
     def img_alpha_nn(self, range_x=(-30, 30), range_y=(-30, 30), N_points=50, n=99999):
         """ Visualise the output of the dynamics parameter network alpha over _a_ when dim_a == 2 and alpha_rnn=False
-        
+
         :param range_x: range of first dimension of a
         :param range_y: range of second dimension of a
         :param N_points: points to sample

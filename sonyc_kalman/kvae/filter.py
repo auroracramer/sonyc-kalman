@@ -66,7 +66,7 @@ class KalmanFilter(object):
         :param inputs: (batch_size, variable dimensions)
         :return:
         """
-        mu_pred, Sigma_pred, _, _, alpha, state, buffer, _, _, _ = params
+        mu_pred, Sigma_pred, _, _, alpha, state, buffer, _, _ = params
         y = tf.slice(inputs, [0, 0], [-1, self.dim_y])  # (bs, dim_y)
         # JTC: Remove u
         mask = tf.slice(inputs, [0, self.dim_y], [-1, 1])  # (bs, dim_u)
@@ -83,7 +83,7 @@ class KalmanFilter(object):
         # project system uncertainty into measurement space
         S = tf.matmul(tf.matmul(C, Sigma_pred), C, transpose_b=True) + self.R  # (bs, dim_y, dim_y)
 
-        S_inv = tf.matrix_inverse(S)
+        S_inv = tf.linalg.inv(S)
         K = tf.matmul(tf.matmul(Sigma_pred, C, transpose_b=True), S_inv)  # (bs, dim_z, dim_y)
 
         # For missing values, set to 0 the Kalman gain matrix
@@ -116,10 +116,10 @@ class KalmanFilter(object):
         mu_back, Sigma_back = params
         mu_pred_tp1, Sigma_pred_tp1, mu_filt_t, Sigma_filt_t, A = inputs
 
-        # J_t = tf.matmul(tf.reshape(tf.transpose(tf.matrix_inverse(Sigma_pred_tp1), [0, 2, 1]), [-1, self.dim_z]),
+        # J_t = tf.matmul(tf.reshape(tf.transpose(tf.linalg.inv(Sigma_pred_tp1), [0, 2, 1]), [-1, self.dim_z]),
         #                 self.A)
         # J_t = tf.transpose(tf.reshape(J_t, [-1, self.dim_z, self.dim_z]), [0, 2, 1])
-        J_t = tf.matmul(tf.transpose(A, [0, 2, 1]), tf.matrix_inverse(Sigma_pred_tp1))
+        J_t = tf.matmul(tf.transpose(A, [0, 2, 1]), tf.linalg.inv(Sigma_pred_tp1))
         J_t = tf.matmul(Sigma_filt_t, J_t)
 
         mu_back = mu_filt_t + tf.matmul(J_t, mu_back - mu_pred_tp1)
@@ -147,7 +147,8 @@ class KalmanFilter(object):
         dummy_init_A = tf.ones([self.Sigma.get_shape()[0], self.dim_z, self.dim_z])
         dummy_init_C = tf.ones([self.Sigma.get_shape()[0], self.dim_y, self.dim_z])
         forward_states = tf.scan(self.forward_step_fn, tf.transpose(inputs, [1, 0, 2]),
-                                 initializer=(self.mu, self.Sigma, self.mu, self.Sigma, alpha, state, buffer,
+                                 initializer=(self.mu, self.Sigma, self.mu, self.Sigma,
+                                              alpha, state, buffer,
                                               dummy_init_A, dummy_init_C),
                                  parallel_iterations=1, name='forward')
         return forward_states
@@ -332,10 +333,9 @@ class KalmanFilter(object):
                tf.transpose(C, [1, 0, 2, 3]), tf.transpose(alpha, [1, 0, 2])
 
     def _sast(self, a, s):
-        # JTC: Make 1D
-        _, emb_dim = s.get_shape().as_list()
-        sast = tf.matmul(tf.reshape(s, [-1, emb_dim]), a, transpose_b=True)
-        sast = tf.transpose(tf.reshape(sast, [-1, emb_dim]), [0, 2, 1])
+        _, dim_1, dim_2 = s.get_shape().as_list()
+        sast = tf.matmul(tf.reshape(s, [-1, dim_2]), a, transpose_b=True)
+        sast = tf.transpose(tf.reshape(sast, [-1, dim_1, dim_2]), [0, 2, 1])
         sast = tf.matmul(s, sast)
         return sast
 

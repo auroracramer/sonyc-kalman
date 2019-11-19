@@ -53,13 +53,13 @@ def run():
     # Save hyperparameters
     with open(config.log_dir + '/config.json', 'w') as f:
         json.dump(list(config.__flags), f)
-        
+
 
     # Set GPU
     os.environ['CUDA_VISIBLE_DEVICES'] = config.gpu
 
     with tf.Session() as sess:
-        model = KalmanVariationalAutoencoder(config, train_data, test_data, sess)
+        model = KalmanVariationalAutoencoder(train_data, test_data, config, sess)
 
         model.build_model().build_loss().initialize_variables()
         err = model.train()
