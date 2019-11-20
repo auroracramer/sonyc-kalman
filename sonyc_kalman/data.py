@@ -5,7 +5,7 @@ import pandas as pd
 import h5py
 import numpy as np
 
-import data_aggr
+from . import data_aggr
 
 
 def load_openl3_time_series(hdf5_path, delta_mins=15, aggr_func=None):
@@ -76,12 +76,12 @@ if __name__ == '__main__':
     parser.add_argument('output_path', default='.')
     parser.add_argument('delta_mins', type=int, default=15)
     # Aggregation mode flag
-    parser.add_argument("-a", "--aggr", required=True, 
+    parser.add_argument("-a", "--aggr", required=True,
                         choices=['random','centroid','medoid','anti_medoid'],
                         help="Aggregation method to use")
 
     args = parser.parse_args()
-    
+
     if args.aggr == 'random':
         aggr_func = data_aggr.random
     if args.aggr == 'centroid':
@@ -90,13 +90,13 @@ if __name__ == '__main__':
         aggr_func = data_aggr.medoid
     if args.aggr == 'anti_medoid':
         aggr_func = data_aggr.anti_medoid
-        
+
 
     out_fname = "{}_{}minslot_{}.npz".format(os.path.basename(args.hdf5_path).split('.')[0],
                                              args.delta_mins,
                                              args.aggr)
     out_path = os.path.join(args.output_path, out_fname)
 
-    
+
     X, mask = load_openl3_time_series(args.hdf5_path, delta_mins=args.delta_mins, aggr_func=aggr_func)
     np.savez_compressed(out_path, X=X, mask=mask)
