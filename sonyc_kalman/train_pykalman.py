@@ -29,13 +29,13 @@ def process_arguments(args):
                         dest='data_range', type=int, default=None,
                         help='Upper index bound on data')
     
-    parser.add_argument('--model_name', type=str, default = None,
+    parser.add_argument('--model_name', type=str, default=None,
                         help='Name to store model under')
     
     parser.add_argument('--output_path', type=str,
                         help='Path to store trained pykalman output')
     
-    parser.add_argument('--mask_path', type=str, default = None,
+    parser.add_argument('--mask_path', type=str, default=None,
                         help='Path to load the mask for the data')
     
     return parser.parse_args(args)
@@ -44,7 +44,7 @@ if __name__=='__main__':
     params = process_arguments(sys.argv[1:])
     
     #loads sensor name
-    sensor_name = params.sensor.split('/')[-1]
+    sensor_name = os.path.basename(params.sensor)
     
     print('Loading data from {}'.format(sensor_name))
     
@@ -79,12 +79,12 @@ if __name__=='__main__':
     
     #dumps result to pickle file
     if params.model_name is not None:
-        model_name = params.model_name+'.pkl'
+        model_name = params.model_name + '.pkl'
     else:
         model_name = sensor_name + '_model.pkl'
     
-    with open(os.path.join(params.output_path, model_name), 'wb') as fd:
-        pickle.dump(kf_trained, fd)
+    with open(os.path.join(params.output_path, model_name),'wb') as fd:
+        pickle.dump(kf_trained,fd)
 
         
         
