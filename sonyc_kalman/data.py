@@ -40,12 +40,12 @@ def load_openl3_time_series(hdf5_path, delta_mins=15, aggr_func=None):
                 if curr_slot_emb_list:
                     slot_emb = aggr_func(curr_slot_emb_list)
                     X.append(slot_emb)
-                    mask.append(1)
+                    mask.append(0)
                 else:
                     # If there are no embeddings (i.e. there is missing data), add a dummy
-                    # embedding and add a zero mask value
+                    # embedding and add a 1 mask value (following numpy.ma conventions)
                     X.append(np.zeros((emb_size,)))
-                    mask.append(0)
+                    mask.append(1)
 
                 # Reset the embedding list and update the upper bound for this slot
                 curr_slot_emb_list = []
