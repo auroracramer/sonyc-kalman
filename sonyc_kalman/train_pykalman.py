@@ -5,6 +5,8 @@ import pickle
 
 import pykalman as pk
 from numpy import ma
+from sklearn.decomposition import PCA
+
 from data import load_openl3_time_series as load_data
 
 
@@ -38,6 +40,9 @@ def process_arguments(args):
     parser.add_argument('--mask_path', type=str, default=None,
                         help='Path to load the mask for the data')
     
+    parser.add_argument('--n_pca', type=int, default=None,
+                        help='number of PCA components to use if using PCA')
+    
     return parser.parse_args(args)
 
 if __name__=='__main__':
@@ -50,7 +55,14 @@ if __name__=='__main__':
     
     #loads data and mask from sensor
     data, mask = load_data(params.sensor)
-
+    
+    #applies PCA if n-components provided
+    if params.n_pca is not None:
+        pca_fit = PCA(n_components=params.n_pca)
+        pca_fit.fit(data)
+        data = pca_fit.transform(data)
+    
+    
     #loads additional mask, if present
     if params.mask_path is not None:
         mask_npz = np.load(params.mask_path)
