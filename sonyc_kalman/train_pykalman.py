@@ -61,6 +61,18 @@ if __name__=='__main__':
         pca_fit = PCA(n_components=params.n_pca)
         pca_fit.fit(data)
         data = pca_fit.transform(data)
+        
+        #save the PCA model
+        #dumps result to pickle file
+        if params.model_name is not None:
+            pca_name = params.model_name + '_pca.pkl'
+        else:
+            model_name = sensor_name + '_pca.pkl'
+
+        with open(os.path.join(params.output_path, pca_name),'wb') as fd:
+            pickle.dump(pca_fit,fd) 
+    
+        
     
     
     #loads additional mask, if present
@@ -76,7 +88,7 @@ if __name__=='__main__':
         data = data[:params.data_range] 
     
     
-    print('Training Kalman Filter: Sensor: {},\t N_Iterations: {},\t Latent Space Dim{}'\
+    print('Training Kalman Filter:\nSensor: {},\t N_Iterations: {},\t Latent Space Dim {}'\
           .format(sensor_name, params.n_iter, params.latent_dim))
     
     #constructs kalman filter to specifications (PCA NOT YET APPIED)
@@ -87,7 +99,7 @@ if __name__=='__main__':
     #runs EM and stores result
     kf_trained = kf.em(data, n_iter=params.n_iter)
     
-    print('Training complete, saving result to {}'.format(params.output_path))
+    print('Training complete, saving result to {}'.format(os.path.join(params.output_path, model_name)))
     
     #dumps result to pickle file
     if params.model_name is not None:
