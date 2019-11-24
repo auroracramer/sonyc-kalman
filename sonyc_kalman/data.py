@@ -70,6 +70,93 @@ def load_openl3_time_series(hdf5_path, delta_mins=15, aggr_func=None):
     return X, mask
 
 
+def series_splitter(invalid_mask, test_ratio=0.25, mode='random_holes', hole_param=[20, 10]):
+    '''
+    Given a `invalid_mask` of length n, generate masks for the train split and test split according to `test_ratio`.
+
+    Params:
+    -------
+        invalid_mask: list or np.array
+            an array of 1's and 0's. 0 being valid, 1 being invalid
+        test_ratio: float (0, 1)
+            the fraction of the data to be split out as test
+        mode: str
+            should be one of 'random_holes', 'r', 'chronological', or 'c'.
+            'random_holes' - punch_out randomly (Guasssian according to `hole_param`) sized holes in the series and 
+            set aside as test.
+            'chronological' - just use the begining as train and the end as test, modeling real world delopyment.
+            hole_param in chronological mode is ignored.
+        hole_param: list [mean, std]
+            used for the 'random_holes' mode.
+            
+    Returns:
+    --------
+        train_mask: np.array of int's
+            an array of 1's and 0's that can be used to mask any series. 1 means selected for the training split
+        test_mask: np.array of int's
+            an array of 1's and 0's that can be used to mask any series. 1 means selected for the test split
+    '''
+    if mode == 'chronological' or mode == 'c':
+        chrono_mode = True
+    elif mode == 'random_holes' or mode == 'r':
+        chrono_mode = False
+    else:
+        raise ValueError("type must be one of 'random_holes', 'r', 'chronological', or 'c'.")
+
+    invalid_mask = np.array(invalid_mask, dtype=np.bool)
+    valid_mask = 1 - invalid_mask
+    valid_mask = valid_mask.astype(np.bool)
+    n_total_valid = sum(valid_mask)
+    n_test = int(round(test_ratio * n_total_valid))
+    n_train = n_total_valid - n_test
+    
+    train_mask = valid_mask.copy()
+    test_mask = valid_mask.copy()
+    if chrono_mode:
+        # first split the data as if all the valid frames are contiguous
+        continuous_split_test = np.array([0] * n_train + [1] * n_test, dtype=int)
+        continuous_split_train = 1 - continuous_split_test
+        # then use the valid_mask to put these contiguous masks into the right places
+        test_mask[valid_mask]  = continuous_split_test
+        train_mask[valid_mask] = continuous_split_train
+
+    else:
+        # 'random_holes' mode
+        ## first generate an array that holes the sizes of the holes, with length n_holes
+        hole_sizes = []
+        while sum(hole_sizes) < n_test:
+            rand_size = int(round(np.random.normal(hole_param[0], hole_param[1])))
+            if rand_size > 0:
+                hole_sizes.append(rand_size)
+
+        if sum(hole_sizes) > n_test:
+            hole_sizes.pop()
+            last_size = n_test - sum(hole_sizes)
+            hole_sizes.append(last_size)
+
+        ## next, decide where the holes are gonna be, ie, how to split the training data into n_holes + 1 parts
+        n_holes = len(hole_sizes)
+        # pick n_holes positions from all n_train+1 positions: this avoids two adjacent holes
+        hole_start_positions = np.sort(np.random.choice(n_train+1, n_holes, replace=False))
+        inter_hole_intervals = [hole_start_positions[0]] + list(np.diff(hole_start_positions))
+        after_last_hole = n_train - hole_start_positions[-1]
+
+        ## then build the continuous_split arrays according to hole_sizes
+        continuous_split_test = []
+        for hole, bread in zip(hole_sizes, inter_hole_intervals):
+            continuous_split_test += bread * [0]
+            continuous_split_test += hole * [1]
+        continuous_split_test += after_last_hole * [0]
+
+        ## finally put things into places
+        continuous_split_test = np.array(continuous_split_test, dtype=int)
+        continuous_split_train = 1 - continuous_split_test
+        test_mask[valid_mask]  = continuous_split_test
+        train_mask[valid_mask] = continuous_split_train
+
+    return train_mask, test_mask
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('hdf5_path')
