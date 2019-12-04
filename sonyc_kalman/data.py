@@ -70,31 +70,36 @@ def load_openl3_time_series(hdf5_path, delta_mins=15, aggr_func=None):
     return X, mask
 
 
-def series_splitter(invalid_mask, test_ratio=0.25, mode='random_holes', hole_param=[20, 10]):
+def series_splitter(mask, test_ratio=0.25, mode='random_holes', hole_mean=20, hole_std=10, min_hole_size=2):
     '''
     Given a `invalid_mask` of length n, generate masks for the train split and test split according to `test_ratio`.
 
     Params:
     -------
-        invalid_mask: list or np.array
-            an array of 1's and 0's. 0 being valid, 1 being invalid
+        mask: list or np.array
+            an array of 1's and 0's. 1 being masked, 0 being readable
         test_ratio: float (0, 1)
             the fraction of the data to be split out as test
         mode: str
             should be one of 'random_holes', 'r', 'chronological', or 'c'.
-            'random_holes' - punch_out randomly (Guasssian according to `hole_param`) sized holes in the series and 
+            'random_holes' - punch_out randomly (Guassian according to `hole_param`) sized holes in the series and 
             set aside as test.
             'chronological' - just use the begining as train and the end as test, modeling real world delopyment.
             hole_param in chronological mode is ignored.
-        hole_param: list [mean, std]
-            used for the 'random_holes' mode.
-            
+        hole_mean: positive number
+            used for the 'random_holes' mode and ignored otherwise. Specify the mean of the normal distribution from 
+            which the size of the hole is drawn.
+        hole_std: positive number
+            used for the 'random_holes' mode and ignored otherwise. Specify the mean of the normal distribution from 
+            which the size of the hole is drawn.
+        min_hole_size: positive number
+            used for the 'random_holes' mode and ignored otherwise. size of the minimal hole.
     Returns:
     --------
         train_mask: np.array of int's
-            an array of 1's and 0's that can be used to mask any series. 1 means selected for the training split
+            an array of 1's and 0's that can be used to mask any series. 1 being masked, 0 being selected for the train split
         test_mask: np.array of int's
-            an array of 1's and 0's that can be used to mask any series. 1 means selected for the test split
+            an array of 1's and 0's that can be used to mask any series. 1 being masked, 0 being selected for the test split
     '''
     if mode == 'chronological' or mode == 'c':
         chrono_mode = True
@@ -103,30 +108,30 @@ def series_splitter(invalid_mask, test_ratio=0.25, mode='random_holes', hole_par
     else:
         raise ValueError("type must be one of 'random_holes', 'r', 'chronological', or 'c'.")
 
-    invalid_mask = np.array(invalid_mask, dtype=np.bool)
-    valid_mask = 1 - invalid_mask
-    valid_mask = valid_mask.astype(np.bool)
-    n_total_valid = sum(valid_mask)
+    invalid_idx = np.array(mask, dtype=np.bool)
+    valid_idx = 1 - invalid_idx
+    valid_idx = valid_idx.astype(np.bool)
+    n_total_valid = sum(valid_idx)
     n_test = int(round(test_ratio * n_total_valid))
     n_train = n_total_valid - n_test
     
-    train_mask = valid_mask.copy()
-    test_mask = valid_mask.copy()
+    train_mask = np.zeros_like(mask)
+    test_mask = np.zeros_like(mask)
     if chrono_mode:
         # first split the data as if all the valid frames are contiguous
-        continuous_split_test = np.array([0] * n_train + [1] * n_test, dtype=int)
+        continuous_split_test = np.array([1] * n_train + [0] * n_test, dtype=int)
         continuous_split_train = 1 - continuous_split_test
         # then use the valid_mask to put these contiguous masks into the right places
-        test_mask[valid_mask]  = continuous_split_test
-        train_mask[valid_mask] = continuous_split_train
+        test_mask[valid_idx]  = continuous_split_test
+        train_mask[valid_idx] = continuous_split_train
 
     else:
         # 'random_holes' mode
         ## first generate an array that holes the sizes of the holes, with length n_holes
         hole_sizes = []
         while sum(hole_sizes) < n_test:
-            rand_size = int(round(np.random.normal(hole_param[0], hole_param[1])))
-            if rand_size > 0:
+            rand_size = int(round(np.random.normal(hole_mean, hole_std)))
+            if rand_size >= min_hole_size:
                 hole_sizes.append(rand_size)
 
         if sum(hole_sizes) > n_test:
@@ -144,15 +149,15 @@ def series_splitter(invalid_mask, test_ratio=0.25, mode='random_holes', hole_par
         ## then build the continuous_split arrays according to hole_sizes
         continuous_split_test = []
         for hole, bread in zip(hole_sizes, inter_hole_intervals):
-            continuous_split_test += bread * [0]
-            continuous_split_test += hole * [1]
-        continuous_split_test += after_last_hole * [0]
+            continuous_split_test += bread * [1]
+            continuous_split_test += hole * [0]
+        continuous_split_test += after_last_hole * [1]
 
         ## finally put things into places
         continuous_split_test = np.array(continuous_split_test, dtype=int)
         continuous_split_train = 1 - continuous_split_test
-        test_mask[valid_mask]  = continuous_split_test
-        train_mask[valid_mask] = continuous_split_train
+        test_mask[valid_idx]  = continuous_split_test
+        train_mask[valid_idx] = continuous_split_train
 
     return train_mask, test_mask
 
