@@ -119,7 +119,7 @@ def series_splitter(mask, test_ratio=0.25, mode='random_holes', hole_mean=20, ho
     test_mask = np.zeros_like(mask)
     if chrono_mode:
         # first split the data as if all the valid frames are contiguous
-        continuous_split_test = np.array([1] * n_train + [0] * n_test, dtype=int)
+        continuous_split_test = np.array([0] * n_train + [1] * n_test, dtype=int)
         continuous_split_train = 1 - continuous_split_test
         # then use the valid_mask to put these contiguous masks into the right places
         test_mask[valid_idx]  = continuous_split_test
