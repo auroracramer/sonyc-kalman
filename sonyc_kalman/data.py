@@ -70,14 +70,14 @@ def load_openl3_time_series(hdf5_path, delta_mins=15, aggr_func=None):
     return X, mask
 
 
-def series_splitter(mask, test_ratio=0.25, mode='random_holes', hole_mean=20, hole_std=10, min_hole_size=2, random_state=0):
+def series_splitter(mask_length, test_ratio=0.25, mode='random_holes', hole_mean=20, hole_std=10, min_hole_size=2, random_state=0):
     '''
     Given a `invalid_mask` of length n, generate masks for the train split and test split according to `test_ratio`.
 
     Params:
     -------
-        mask: list or np.array
-            an array of 1's and 0's. 1 being masked, 0 being readable
+        mask_length: int
+            length of the mask
         test_ratio: float (0, 1)
             the fraction of the data to be split out as test
         mode: str
@@ -113,24 +113,13 @@ def series_splitter(mask, test_ratio=0.25, mode='random_holes', hole_mean=20, ho
     
     np.random.seed(random_state)
 
-    invalid_idx = np.array(mask, dtype=np.bool)
-    valid_idx = 1 - invalid_idx
-    valid_idx = valid_idx.astype(np.bool)
-    n_total_valid = sum(valid_idx)
-    n_test = int(round(test_ratio * n_total_valid))
-    n_train = n_total_valid - n_test
+    n_test = int(round(test_ratio * mask_length))
+    n_train = mask_length - n_test
     
-    # init by selecting nothing (1) for test and everything to train (0)
-    train_mask = np.zeros_like(mask)
-    test_mask = np.ones_like(mask)
+    # build test_mask as list
+    test_mask = list()
     if chrono_mode:
-        # first split the data as if all the valid frames are contiguous
-        continuous_split_test = np.array( [1] * n_train + [0] * n_test, dtype=int)
-        # only select regions in valid_idx for test_mask
-        test_mask[valid_idx]  = continuous_split_test
-        # everything else goes in train_mask
-        train_mask = 1 - test_mask
-
+        test_mask = [1] * n_train + [0] * n_test
     else:
         # 'random_holes' mode
         ## first generate an array that holes the sizes of the holes, with length n_holes
@@ -147,24 +136,20 @@ def series_splitter(mask, test_ratio=0.25, mode='random_holes', hole_mean=20, ho
 
         ## next, decide where the holes are gonna be, ie, how to split the training data into n_holes + 1 parts
         n_holes = len(hole_sizes)
-        # pick n_holes positions from all n_train+1 positions: this avoids two adjacent holes
+        ## pick n_holes positions from all n_train+1 positions: this avoids two adjacent holes
         hole_start_positions = np.sort(np.random.choice(n_train+1, n_holes, replace=False))
         inter_hole_intervals = [hole_start_positions[0]] + list(np.diff(hole_start_positions))
         after_last_hole = n_train - hole_start_positions[-1]
 
         ## then build the continuous_split arrays according to hole_sizes
-        continuous_split_test = []
         for hole, bread in zip(hole_sizes, inter_hole_intervals):
-            continuous_split_test += bread * [1]
-            continuous_split_test += hole * [0]
-        continuous_split_test += after_last_hole * [1]
+            test_mask += bread * [1]
+            test_mask += hole * [0]
+        test_mask += after_last_hole * [1]
 
-        ## finally put things into places
-        continuous_split_test = np.array(continuous_split_test, dtype=int)
-        # only select regions in valid_idx for test_mask
-        test_mask[valid_idx]  = continuous_split_test
-        # everything else goes in train_mask
-        train_mask = 1 - test_mask
+    # convert and clean up
+    test_mask = np.array(test_mask, dtype=int)
+    train_mask = 1 - test_mask
 
     return train_mask, test_mask
 
