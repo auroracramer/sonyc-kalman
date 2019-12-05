@@ -67,7 +67,7 @@ if __name__=='__main__':
         if params.model_name is not None:
             pca_name = params.model_name + '_pca.pkl'
         else:
-            model_name = sensor_name + '_pca.pkl'
+            pca_name = sensor_name + '_pca.pkl'
 
         with open(os.path.join(params.output_path, pca_name),'wb') as fd:
             pickle.dump(pca_fit,fd) 
@@ -99,7 +99,6 @@ if __name__=='__main__':
     #runs EM and stores result
     kf_trained = kf.em(data, n_iter=params.n_iter)
     
-    print('Training complete, saving result to {}'.format(os.path.join(params.output_path, model_name)))
     
     #dumps result to pickle file
     if params.model_name is not None:
@@ -107,7 +106,11 @@ if __name__=='__main__':
     else:
         model_name = sensor_name + '_model.pkl'
     
-    with open(os.path.join(params.output_path, model_name),'wb') as fd:
+    model_path = os.path.join(params.output_path, model_name)
+    print('Training complete, saving result to {}'.format(model_path))
+
+    
+    with open(model_path,'wb') as fd:
         pickle.dump(kf_trained,fd)
 
         
