@@ -70,7 +70,7 @@ def load_openl3_time_series(hdf5_path, delta_mins=15, aggr_func=None):
     return X, mask
 
 
-def series_splitter(mask, test_ratio=0.25, mode='random_holes', hole_mean=20, hole_std=10, min_hole_size=2):
+def series_splitter(mask, test_ratio=0.25, mode='random_holes', hole_mean=20, hole_std=10, min_hole_size=2, random_state=0):
     '''
     Given a `invalid_mask` of length n, generate masks for the train split and test split according to `test_ratio`.
 
@@ -94,6 +94,9 @@ def series_splitter(mask, test_ratio=0.25, mode='random_holes', hole_mean=20, ho
             which the size of the hole is drawn.
         min_hole_size: positive number
             used for the 'random_holes' mode and ignored otherwise. size of the minimal hole.
+        random_state: int
+            for reproducability
+
     Returns:
     --------
         train_mask: np.array of int's
@@ -107,6 +110,8 @@ def series_splitter(mask, test_ratio=0.25, mode='random_holes', hole_mean=20, ho
         chrono_mode = False
     else:
         raise ValueError("type must be one of 'random_holes', 'r', 'chronological', or 'c'.")
+    
+    np.random.seed(random_state)
 
     invalid_idx = np.array(mask, dtype=np.bool)
     valid_idx = 1 - invalid_idx
@@ -115,15 +120,16 @@ def series_splitter(mask, test_ratio=0.25, mode='random_holes', hole_mean=20, ho
     n_test = int(round(test_ratio * n_total_valid))
     n_train = n_total_valid - n_test
     
+    # init by selecting nothing (1) for test and everything to train (0)
     train_mask = np.zeros_like(mask)
-    test_mask = np.zeros_like(mask)
+    test_mask = np.ones_like(mask)
     if chrono_mode:
         # first split the data as if all the valid frames are contiguous
-        continuous_split_test = np.array([0] * n_train + [1] * n_test, dtype=int)
-        continuous_split_train = 1 - continuous_split_test
-        # then use the valid_mask to put these contiguous masks into the right places
+        continuous_split_test = np.array( [1] * n_train + [0] * n_test, dtype=int)
+        # only select regions in valid_idx for test_mask
         test_mask[valid_idx]  = continuous_split_test
-        train_mask[valid_idx] = continuous_split_train
+        # everything else goes in train_mask
+        train_mask = 1 - test_mask
 
     else:
         # 'random_holes' mode
@@ -155,9 +161,10 @@ def series_splitter(mask, test_ratio=0.25, mode='random_holes', hole_mean=20, ho
 
         ## finally put things into places
         continuous_split_test = np.array(continuous_split_test, dtype=int)
-        continuous_split_train = 1 - continuous_split_test
+        # only select regions in valid_idx for test_mask
         test_mask[valid_idx]  = continuous_split_test
-        train_mask[valid_idx] = continuous_split_train
+        # everything else goes in train_mask
+        train_mask = 1 - test_mask
 
     return train_mask, test_mask
 
