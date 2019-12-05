@@ -70,6 +70,90 @@ def load_openl3_time_series(hdf5_path, delta_mins=15, aggr_func=None):
     return X, mask
 
 
+def series_splitter(mask_length, test_ratio=0.25, mode='random_holes', hole_mean=20, hole_std=10, min_hole_size=2, random_state=0):
+    '''
+    Given a `invalid_mask` of length n, generate masks for the train split and test split according to `test_ratio`.
+
+    Params:
+    -------
+        mask_length: int
+            length of the mask
+        test_ratio: float (0, 1)
+            the fraction of the data to be split out as test
+        mode: str
+            should be one of 'random_holes', 'r', 'chronological', or 'c'.
+            'random_holes' - punch_out randomly (Guassian according to `hole_param`) sized holes in the series and 
+            set aside as test.
+            'chronological' - just use the begining as train and the end as test, modeling real world delopyment.
+            hole_param in chronological mode is ignored.
+        hole_mean: positive number
+            used for the 'random_holes' mode and ignored otherwise. Specify the mean of the normal distribution from 
+            which the size of the hole is drawn.
+        hole_std: positive number
+            used for the 'random_holes' mode and ignored otherwise. Specify the mean of the normal distribution from 
+            which the size of the hole is drawn.
+        min_hole_size: positive number
+            used for the 'random_holes' mode and ignored otherwise. size of the minimal hole.
+        random_state: int
+            for reproducability
+
+    Returns:
+    --------
+        train_mask: np.array of int's
+            an array of 1's and 0's that can be used to mask any series. 1 being masked, 0 being selected for the train split
+        test_mask: np.array of int's
+            an array of 1's and 0's that can be used to mask any series. 1 being masked, 0 being selected for the test split
+    '''
+    if mode == 'chronological' or mode == 'c':
+        chrono_mode = True
+    elif mode == 'random_holes' or mode == 'r':
+        chrono_mode = False
+    else:
+        raise ValueError("type must be one of 'random_holes', 'r', 'chronological', or 'c'.")
+    
+    np.random.seed(random_state)
+
+    n_test = int(round(test_ratio * mask_length))
+    n_train = mask_length - n_test
+    
+    # build test_mask as list
+    test_mask = list()
+    if chrono_mode:
+        test_mask = [1] * n_train + [0] * n_test
+    else:
+        # 'random_holes' mode
+        ## first generate an array that holes the sizes of the holes, with length n_holes
+        hole_sizes = []
+        while sum(hole_sizes) < n_test:
+            rand_size = int(round(np.random.normal(hole_mean, hole_std)))
+            if rand_size >= min_hole_size:
+                hole_sizes.append(rand_size)
+
+        if sum(hole_sizes) > n_test:
+            hole_sizes.pop()
+            last_size = n_test - sum(hole_sizes)
+            hole_sizes.append(last_size)
+
+        ## next, decide where the holes are gonna be, ie, how to split the training data into n_holes + 1 parts
+        n_holes = len(hole_sizes)
+        ## pick n_holes positions from all n_train+1 positions: this avoids two adjacent holes
+        hole_start_positions = np.sort(np.random.choice(n_train+1, n_holes, replace=False))
+        inter_hole_intervals = [hole_start_positions[0]] + list(np.diff(hole_start_positions))
+        after_last_hole = n_train - hole_start_positions[-1]
+
+        ## then build the continuous_split arrays according to hole_sizes
+        for hole, bread in zip(hole_sizes, inter_hole_intervals):
+            test_mask += bread * [1]
+            test_mask += hole * [0]
+        test_mask += after_last_hole * [1]
+
+    # convert and clean up
+    test_mask = np.array(test_mask, dtype=int)
+    train_mask = 1 - test_mask
+
+    return train_mask, test_mask
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('hdf5_path')
