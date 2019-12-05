@@ -5,6 +5,8 @@ import pickle
 
 import pykalman as pk
 from numpy import ma
+from sklearn.decomposition import PCA
+
 from data import load_openl3_time_series as load_data
 
 
@@ -38,6 +40,9 @@ def process_arguments(args):
     parser.add_argument('--mask_path', type=str, default=None,
                         help='Path to load the mask for the data')
     
+    parser.add_argument('--n_pca', type=int, default=None,
+                        help='number of PCA components to use if using PCA')
+    
     return parser.parse_args(args)
 
 if __name__=='__main__':
@@ -50,7 +55,26 @@ if __name__=='__main__':
     
     #loads data and mask from sensor
     data, mask = load_data(params.sensor)
+    
+    #applies PCA if n-components provided
+    if params.n_pca is not None:
+        pca_fit = PCA(n_components=params.n_pca)
+        pca_fit.fit(data)
+        data = pca_fit.transform(data)
+        
+        #save the PCA model
+        #dumps result to pickle file
+        if params.model_name is not None:
+            pca_name = params.model_name + '_pca.pkl'
+        else:
+            pca_name = sensor_name + '_pca.pkl'
 
+        with open(os.path.join(params.output_path, pca_name),'wb') as fd:
+            pickle.dump(pca_fit,fd) 
+    
+        
+    
+    
     #loads additional mask, if present
     if params.mask_path is not None:
         mask_npz = np.load(params.mask_path)
@@ -64,7 +88,7 @@ if __name__=='__main__':
         data = data[:params.data_range] 
     
     
-    print('Training Kalman Filter: Sensor: {},\t N_Iterations: {},\t Latent Space Dim{}'\
+    print('Training Kalman Filter:\nSensor: {},\t N_Iterations: {},\t Latent Space Dim {}'\
           .format(sensor_name, params.n_iter, params.latent_dim))
     
     #constructs kalman filter to specifications (PCA NOT YET APPIED)
@@ -75,7 +99,6 @@ if __name__=='__main__':
     #runs EM and stores result
     kf_trained = kf.em(data, n_iter=params.n_iter)
     
-    print('Training complete, saving result to {}'.format(params.output_path))
     
     #dumps result to pickle file
     if params.model_name is not None:
@@ -83,7 +106,11 @@ if __name__=='__main__':
     else:
         model_name = sensor_name + '_model.pkl'
     
-    with open(os.path.join(params.output_path, model_name),'wb') as fd:
+    model_path = os.path.join(params.output_path, model_name)
+    print('Training complete, saving result to {}'.format(model_path))
+
+    
+    with open(model_path,'wb') as fd:
         pickle.dump(kf_trained,fd)
 
         
