@@ -5,7 +5,10 @@ import pandas as pd
 import h5py
 import numpy as np
 
-from . import data_aggr
+try:
+    import data_aggr
+except:
+    from . import data_aggr
 
 
 def load_openl3_time_series(hdf5_path, delta_mins=15, aggr_func=None):
