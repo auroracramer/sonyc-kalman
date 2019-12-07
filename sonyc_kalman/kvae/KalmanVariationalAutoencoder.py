@@ -20,13 +20,15 @@ np.random.seed(1337)
 class KalmanVariationalAutoencoder(object):
     """ This class defines functions to build, train and evaluate Kalman Variational Autoencoders
     """
-    def __init__(self, train_data, test_data, config, sess):
+    def __init__(self, train_data, test_data, train_mask, test_mask, config, sess):
         self.config = config
 
         # Load the dataset
         self.train_data = train_data
+        self.train_mask = np.logical_not(train_mask) # This module uses the opposite convention of `np.ma`
         self.train_n_sequences, self.train_n_timesteps, self.emb_dim = train_data.shape
         self.test_data = test_data
+        self.test_mask = np.logical_not(test_mask) # This module uses the opposite convention of `np.ma`
         self.test_n_sequences, self.test_n_timesteps, test_emb_dim = test_data.shape
         assert self.emb_dim == test_emb_dim
 
@@ -348,6 +350,7 @@ class KalmanVariationalAutoencoder(object):
             for j in range(num_batches):
                 mask_train[j] = self.mask_impute_random(t_init_mask=self.config.t_init_train_miss,
                                                         drop_prob=self.config.train_miss_prob)
+
         all_summaries = tf.summary.merge_all()
 
         for n in range(self.config.num_epochs):
@@ -361,7 +364,7 @@ class KalmanVariationalAutoencoder(object):
             for i in range(num_batches):
                 slc = slice(i * self.config.batch_size, (i + 1) * self.config.batch_size)
                 feed_dict = {self.x: self.train_data[slc],
-                             self.mask: mask_train[i],
+                             self.mask: np.logical_and(mask_train[i], self.train_mask[slc]), # JTC: logical and with given mask
                              self.ph_steps: self.train_n_timesteps,
                              self.scale_reconstruction: self.config.scale_reconstruction}
 
@@ -427,7 +430,7 @@ class KalmanVariationalAutoencoder(object):
         for i in range(self.test_n_sequences // self.config.batch_size):
             slc = slice(i * self.config.batch_size, (i + 1) * self.config.batch_size)
             feed_dict = {self.x: self.test_data[slc],
-                         self.mask: mask_test,
+                         self.mask: np.logical_and(mask_test, self.test_mask[slc]),
                          self.ph_steps: self.test_n_timesteps,
                          self.scale_reconstruction: 1.0}
 
@@ -456,7 +459,7 @@ class KalmanVariationalAutoencoder(object):
         slc = slice(idx_batch * self.config.batch_size, (idx_batch + 1) * self.config.batch_size)
         feed_dict = {self.x: self.test_data[slc],
                      self.ph_steps: self.test_n_timesteps,
-                     self.mask: mask_test}
+                     self.mask: np.logical_and(mask_test, self.test_mask[slc])}
         smooth_z = self.sess.run(self.model_vars['smooth'], feed_dict)
 
         # Sample deterministic generation
