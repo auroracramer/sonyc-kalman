@@ -26,9 +26,10 @@ def get_train_config():
 
     # Choose data set
     # JTC: Change these default paths
-    cl.DEFINE_string('train_data', '', 'Select data set') # 'box_rnd', 'box_gravity', 'polygon' or 'pong'
-    cl.DEFINE_string('test_data', '', 'Select data set') # 'box_rnd', 'box_gravity', 'polygon' or 'pong'
-
+    cl.DEFINE_string('data_path', '', 'Select data set')
+    cl.DEFINE_string('train_mask_path', '', 'Select train mask')
+    cl.DEFINE_string('valid_mask_path', '', 'Select valid mask')
+    
     # VAE config
     cl.DEFINE_string('out_distr', 'bernoulli', 'Output distibution')
     cl.DEFINE_string('activation', 'relu', 'Activation function in VAE')
@@ -56,6 +57,8 @@ def get_train_config():
 
     # Training config
     cl.DEFINE_integer('batch_size', 32, 'Size of mini batches')
+    cl.DEFINE_integer('n_timesteps', 32, 'Size of example sequences')
+    cl.DEFINE_integer('hop_length', 16, 'Hop length for dividing sequences into example subsequences')
     cl.DEFINE_float('init_lr', 0.007, 'Starter learning rate')
     cl.DEFINE_float('init_kf_matrices', 0.05, 'Standard deviation of noise used to initialize B and C')
     cl.DEFINE_float('max_grad_norm', 150.0, 'Gradient norm clipping')
