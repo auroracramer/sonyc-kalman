@@ -1,9 +1,12 @@
 import argparse
 import datetime
+import itertools
+import operator
 import os
 import pandas as pd
 import h5py
 import numpy as np
+import librosa 
 
 try:
     import data_aggr
@@ -155,6 +158,84 @@ def series_splitter(mask_length, test_ratio=0.25, mode='random_holes', hole_mean
     train_mask = 1 - test_mask
 
     return train_mask, test_mask
+
+
+def mask_to_segment_idxs(mask):
+    '''
+    Given a `mask`, return a list of arrays of indices for contiguous unmasked segments.
+
+    Params:
+    -------
+        mask: np.array
+            array of mask values
+
+    Returns:
+    --------
+        segment_idxs_list: list of np.array of int's
+            a list of arrays of indices for contigulous unmasked segments
+    '''
+    segment_idxs_list = []
+    for key, it in itertools.groupby(enumerate(mask), key=operator.itemgetter(1)):
+        # Skip masked values
+        if key:
+            continue
+            
+        segment_idxs_list.append(np.array(list(zip(*it))[0]))
+        
+    return segment_idxs_list
+
+
+def construct_kvae_data(X, mask, n_timesteps, hop_length):
+    '''
+    Constructs KVAE friendly input matrix out of data matrix `X` and mask array `mask`.
+    
+    Each contiguous segment in `X` (as specified by `mask`) is divided into examples
+    of size `n_timesteps` with a hop length of `hop_length`. Padding is performed
+    to ensure that all frames are accounted for.
+
+    Params:
+    -------
+        X: np.array of shape (num_frames, feature_dim)
+            data matrix
+        mask: np.array
+            array of mask values
+        n_timesteps: int
+            number of frames per training example
+        hop_length: int
+            hop size for dividing each sequence into examples
+
+    Returns:
+    --------
+        X_frames: np.array of shape (num_examples, `n_timesteps`, feature_dim)
+            array of training data suitable for input in KVAE model
+        mask_frames: np.array of shape (num_examples, `n_timesteps`)
+            array of mask values suitable for input in KVAE model
+    '''
+    X_list = []
+    mask_list = []
+
+    for seg_idxs in mask_to_segment_idxs(mask):
+        # Extract the current segment
+        X_seg = X[seg_idxs, :]
+        mask_seg = mask[seg_idxs]
+
+        num_frames = len(seg_idxs)
+        pad_length = max(0, int(np.ceil((num_frames - n_timesteps)/hop_length))*hop_length) + n_timesteps - num_frames
+        if pad_length > 0:
+            # Pad the segment so we don't lose any frames
+            X_seg = np.pad(X_seg, ((0, pad_length), (0,0)), mode='constant')
+            # Padding is with ones for the mask
+            mask_seg = np.pad(mask_seg, (0, pad_length), mode='constant', constant_values=1)
+        
+        # Divide segment into frames
+        X_seg_frames = librosa.util.frame(X_seg, frame_length=n_timesteps, hop_length=hop_length, axis=0)
+        mask_seg_frames = librosa.util.frame(mask_seg, frame_length=n_timesteps, hop_length=hop_length).T
+        
+        # Accumulate current segment batches
+        X_list.append(X_seg_frames)
+        mask_list.append(mask_seg_frames)
+        
+    return np.concatenate(X_list, axis=0), np.concatenate(mask_list, axis=0)
 
 
 if __name__ == '__main__':
