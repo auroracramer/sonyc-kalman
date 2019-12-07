@@ -185,9 +185,9 @@ def mask_to_segment_idxs(mask):
     return segment_idxs_list
 
 
-def construct_kvae_data(X, mask, n_timesteps, hop_length):
+def construct_kvae_data(X, invalid_mask, subset_mask, n_timesteps, hop_length):
     '''
-    Constructs KVAE friendly input matrix out of data matrix `X` and mask array `mask`.
+    Constructs KVAE friendly input matrix out of data matrix `X` and mask array `invalid_mask`.
     
     Each contiguous segment in `X` (as specified by `mask`) is divided into examples
     of size `n_timesteps` with a hop length of `hop_length`. Padding is performed
@@ -197,8 +197,10 @@ def construct_kvae_data(X, mask, n_timesteps, hop_length):
     -------
         X: np.array of shape (num_frames, feature_dim)
             data matrix
-        mask: np.array
-            array of mask values
+        invalid_mask: np.array
+            array of invalid mask values
+        subset_mask: np.array
+            array of mask values for the given subset
         n_timesteps: int
             number of frames per training example
         hop_length: int
@@ -214,10 +216,10 @@ def construct_kvae_data(X, mask, n_timesteps, hop_length):
     X_list = []
     mask_list = []
 
-    for seg_idxs in mask_to_segment_idxs(mask):
+    for seg_idxs in mask_to_segment_idxs(subset_mask):
         # Extract the current segment
         X_seg = X[seg_idxs, :]
-        mask_seg = mask[seg_idxs]
+        mask_seg = invalid_mask[seg_idxs]
 
         num_frames = len(seg_idxs)
         pad_length = max(0, int(np.ceil((num_frames - n_timesteps)/hop_length))*hop_length) + n_timesteps - num_frames
