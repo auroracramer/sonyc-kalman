@@ -3,10 +3,10 @@ import os
 
 import numpy as np
 import tensorflow as tf
-from .kvae import KalmanVariationalAutoencoder
-from .kvae.utils import reload_config, get_train_config
+from kvae import KalmanVariationalAutoencoder
+from kvae.utils import reload_config, get_train_config
 
-from .data import construct_kvae_data
+from data import construct_kvae_data
 
 import seaborn as sns
 sns.set_style("whitegrid", {'axes.grid': False})
@@ -27,11 +27,11 @@ def run():
     # Load data:
     if not config.data_path:
         raise ValueError('Must provide path to data.')
-        
+
     if not os.path.isfile(config.data_path):
         err_msg = 'Invalid path to data: {}'
         raise ValueError(err_msg.format(config.data_path))
-        
+
     if not config.train_mask_path:
         raise ValueError('Must provide path to training mask.')
 
@@ -46,12 +46,13 @@ def run():
         err_msg = 'Invalid path to testing mask: {}'
         raise ValueError(err_msg.format(config.test_mask_path))
 
-    X, mask = np.load(config.data_path)
+    data = np.load(config.data_path)
+    X, mask = data['X'], data['mask']
     train_subset_mask = np.load(config.train_mask_path)
     test_subset_mask = np.load(config.test_mask_path)
-    
+
     train_data, train_mask = construct_kvae_data(X, mask, train_subset_mask, config.n_timesteps, config.hop_length)
-    test_data, train_mask = construct_kvae_data(X, mask, test_subset_mask, config.n_timesteps, config.hop_length)
+    test_data, test_mask = construct_kvae_data(X, mask, test_subset_mask, config.n_timesteps, config.hop_length)
 
     # Add timestamp to log path
     config.log_dir = os.path.join(config.log_dir, '%s' % config.run_name)

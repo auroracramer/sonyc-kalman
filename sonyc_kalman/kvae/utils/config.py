@@ -28,8 +28,8 @@ def get_train_config():
     # JTC: Change these default paths
     cl.DEFINE_string('data_path', '', 'Select data set')
     cl.DEFINE_string('train_mask_path', '', 'Select train mask')
-    cl.DEFINE_string('valid_mask_path', '', 'Select valid mask')
-    
+    cl.DEFINE_string('test_mask_path', '', 'Select test mask')
+
     # VAE config
     cl.DEFINE_string('out_distr', 'bernoulli', 'Output distibution')
     cl.DEFINE_string('activation', 'relu', 'Activation function in VAE')
