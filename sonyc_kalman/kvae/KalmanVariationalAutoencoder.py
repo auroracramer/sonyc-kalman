@@ -348,7 +348,8 @@ class KalmanVariationalAutoencoder(object):
         if self.config.train_miss_prob > 0.0:
             # Always use the same mask for each sequence during training
             for j in range(num_batches):
-                mask_train[j] = self.mask_impute_random(t_init_mask=self.config.t_init_train_miss,
+                mask_train[j] = self.mask_impute_random(self.train_n_timesteps,
+                                                        t_init_mask=self.config.t_init_train_miss,
                                                         drop_prob=self.config.train_miss_prob)
 
         all_summaries = tf.summary.merge_all()
@@ -400,7 +401,8 @@ class KalmanVariationalAutoencoder(object):
 
             if (((n + 1) % self.config.generate_step == 0) and n > 0) or (n == self.config.num_epochs - 1) or (n == 0):
                 # Impute and calculate error
-                mask_impute = self.mask_impute_planning(t_init_mask=self.config.t_init_mask,
+                mask_impute = self.mask_impute_planning(self.test_n_timesteps,
+                                                        t_init_mask=self.config.t_init_mask,
                                                         t_steps_mask=self.config.t_steps_mask)
                 out_res = self.impute(mask_impute, t_init_mask=self.config.t_init_mask, n=n)
 
@@ -614,26 +616,26 @@ class KalmanVariationalAutoencoder(object):
         plt.savefig(self.config.log_dir + '/image_alpha_%05d.png' % n, format='png', bbox_inches='tight', dpi=80)
         plt.close()
 
-    def mask_impute_planning(self, t_init_mask=4, t_steps_mask=12):
+    def mask_impute_planning(self, n_timesteps, t_init_mask=4, t_steps_mask=12):
         """ Create mask with missing values in the middle of the sequence
         :param t_init_mask: observed steps in the beginning of the sequence
         :param t_steps_mask: observed steps in the end
         :return: np.ndarray
         """
-        mask_impute = np.ones((self.config.batch_size, self.test_n_timesteps), dtype=np.float32)
+        mask_impute = np.ones((self.config.batch_size, n_timesteps), dtype=np.float32)
         t_end_mask = t_init_mask + t_steps_mask
         mask_impute[:, t_init_mask: t_end_mask] = 0.0
         return mask_impute
 
-    def mask_impute_random(self, t_init_mask=4, drop_prob=0.5):
+    def mask_impute_random(self, n_timesteps, t_init_mask=4, drop_prob=0.5):
         """ Create mask with values missing at random
         :param t_init_mask: observed steps in the beginning of the sequence
         :param drop_prob: probability of not observing a step
         :return: np.ndarray
         """
-        mask_impute = np.ones((self.config.batch_size, self.test_n_timesteps), dtype=np.float32)
+        mask_impute = np.ones((self.config.batch_size, n_timesteps), dtype=np.float32)
 
-        n_steps = self.test_n_timesteps - t_init_mask
+        n_steps = n_timesteps - t_init_mask
         mask_impute[:, t_init_mask:] = np.random.choice([0, 1], size=(self.config.batch_size, n_steps),
                                                                    p=[drop_prob, 1.0 - drop_prob])
         return mask_impute
@@ -669,11 +671,13 @@ class KalmanVariationalAutoencoder(object):
         for i, v in enumerate(vec):
             if mask_type == 'missing_planning':
                 print("--- Imputation planning, t_steps_mask %s" % v)
-                mask_impute = self.mask_impute_planning(t_init_mask=self.config.t_init_mask,
+                mask_impute = self.mask_impute_planning(self.test_n_timesteps,
+                                                        t_init_mask=self.config.t_init_mask,
                                                         t_steps_mask=v)
             elif mask_type == 'missing_random':
                 print("--- Imputation random, drop_prob %s" % v)
-                mask_impute = self.mask_impute_random(t_init_mask=self.config.t_init_mask,
+                mask_impute = self.mask_impute_random(self.test_n_timesteps,
+                                                      t_init_mask=self.config.t_init_mask,
                                                       drop_prob=v)
             else:
                 raise NotImplementedError
