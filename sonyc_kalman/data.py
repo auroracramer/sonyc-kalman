@@ -185,7 +185,7 @@ def mask_to_segment_idxs(mask):
     return segment_idxs_list
 
 
-def construct_kvae_data(X, invalid_mask, subset_mask, n_timesteps, hop_length):
+def construct_kvae_data(X, invalid_mask, subset_mask, n_timesteps, hop_length, random_state=0):
     '''
     Constructs KVAE friendly input matrix out of data matrix `X` and mask array `invalid_mask`.
 
@@ -205,6 +205,9 @@ def construct_kvae_data(X, invalid_mask, subset_mask, n_timesteps, hop_length):
             number of frames per training example
         hop_length: int
             hop size for dividing each sequence into examples
+        random_state: int
+            for reproducability
+
 
     Returns:
     --------
@@ -237,7 +240,11 @@ def construct_kvae_data(X, invalid_mask, subset_mask, n_timesteps, hop_length):
         X_list.append(X_seg_frames)
         mask_list.append(mask_seg_frames)
 
-    return np.concatenate(X_list, axis=0), np.concatenate(mask_list, axis=0)
+    X_list = np.concatenate(X_list, axis=0)
+    mask_list = np.concatenate(mask_list, axis=0)
+    shuffle_idxs = np.random.permutation(X_list.shape[0])
+
+    return X_list[shuffle_idxs], mask_list[shuffle_idxs]
 
 
 if __name__ == '__main__':
