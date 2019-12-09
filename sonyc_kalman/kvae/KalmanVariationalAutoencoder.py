@@ -553,8 +553,10 @@ class KalmanVariationalAutoencoder(object):
 
         # Get hamming distance on unobserved variables
         ham_unobs = dict()
+        mse_unobs = dict()
         for key, value in zip(('gen', 'filt', 'smooth'), (x_gen_det, x_filtered, x_imputed)):
             ham_unobs[key] = hamming(x_true_unobs.flatten() > 0.5, value[mask_unobs].flatten() > 0.5)
+            mse_unobs[key] = mse(x_true_unobs, value[mask_unobs])
 
         # Baseline is considered as the biggest hamming distance between two frames in the data
         hamming_baseline = 0.0
@@ -571,10 +573,13 @@ class KalmanVariationalAutoencoder(object):
         if plot:
             print("Hamming distance. x_imputed: %.5f, x_filtered: %.5f, x_gen_det: %.5f, baseline: %.5f. " % (
                 ham_unobs['smooth'], ham_unobs['filt'], ham_unobs['gen'], hamming_baseline))
+            print("MSE. x_imputed: %.5f, x_filtered: %.5f, x_gen_det: %.5f. " % (
+                mse_unobs['smooth'], mse_unobs['filt'], mse_unobs['gen']))
             print("Normalized RMSE. a_imputed: %.3f, a_gen_det: %.3f" % (norm_rmse_a_imputed, norm_rmse_a_gen_det))
 
         out_res = (ham_unobs['smooth'], ham_unobs['filt'], ham_unobs['gen'],
-                   hamming_baseline, norm_rmse_a_imputed, norm_rmse_a_gen_det)
+                   hamming_baseline, norm_rmse_a_imputed, norm_rmse_a_gen_det,
+                   mse_unobs['smooth'], mse_unobs['filt'], mse_unobs['gen'])
         return out_res
 
     def img_alpha_nn(self, range_x=(-30, 30), range_y=(-30, 30), N_points=50, n=99999):
@@ -681,10 +686,12 @@ class KalmanVariationalAutoencoder(object):
         hamm_x_imputed = out_res_all[:, 0]
         hamm_x_filtered = out_res_all[:, 1]
         baseline = out_res_all[:, 3]
+        mse_x_imputed = out_res_all[:, 6]
+        mse_x_filtered = out_res_all[:, 7]
 
         results = [(baseline, 'Baseline'),
-                   (hamm_x_imputed, 'KVAE smoothing'),
-                   (hamm_x_filtered, 'KVAE filtering')]
+                   (mse_x_imputed, 'KVAE smoothing'),
+                   (mse_x_filtered, 'KVAE filtering')]
 
         print(out_res_all)
         import matplotlib as mpl
@@ -698,7 +705,7 @@ class KalmanVariationalAutoencoder(object):
                 linestyle = '.-'
             plt.plot(vec, dist, linestyle, linewidth=3, ms=20, label=label)
         plt.xlabel(xlab, fontsize=20)
-        plt.ylabel('Hamming distance', fontsize=20)
+        plt.ylabel('MSE', fontsize=20)
         plt.legend(fontsize=20, loc=1)
         plt.savefig(self.config.log_dir + '/imputation_%s.png' % mask_type)
         plt.close()
