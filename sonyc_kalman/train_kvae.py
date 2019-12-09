@@ -51,8 +51,10 @@ def run():
     train_subset_mask = np.load(config.train_mask_path)
     test_subset_mask = np.load(config.test_mask_path)
 
-    train_data, train_mask = construct_kvae_data(X, mask, train_subset_mask, config.n_timesteps, config.hop_length)
-    test_data, test_mask = construct_kvae_data(X, mask, test_subset_mask, config.n_timesteps, config.hop_length)
+    train_data, train_mask = construct_kvae_data(X, mask, train_subset_mask,
+                                                 n_timesteps=config.n_timesteps,
+                                                 hop_length=config.hop_length)
+    test_data, test_mask = construct_kvae_data(X, mask, test_subset_mask, test=True)
 
     # Add timestamp to log path
     config.log_dir = os.path.join(config.log_dir, '%s' % config.run_name)
