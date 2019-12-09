@@ -96,7 +96,7 @@ def plot_segments(x_true_batch, x_hat_batch, a_batch, z_batch, alpha_batch,
         ax[2, idx].set_xlim([0, n_timesteps-1])
 
         # Plot a_t
-        ax[3, idx].imshow(a.T, aspect=a_aspect,
+        ax[3, idx].imshow(a_batch[idx].T, aspect=a_aspect,
                           cmap='magma', vmin=a_vmin, vmax=a_vmax)
         ax[3, idx].set_ylabel('Feature dimension')
         ax[3, idx].set_title('Recognition latent variable ($a_t$)')
@@ -104,11 +104,10 @@ def plot_segments(x_true_batch, x_hat_batch, a_batch, z_batch, alpha_batch,
         ax[3, idx].set_xlim([0, n_timesteps-1])
 
         # Plot z_t
-        ax[4, idx].imshow(z.T, aspect=z_aspect,
+        ax[4, idx].imshow(z_batch[idx].T, aspect=z_aspect,
                           cmap='magma', vmin=z_vmin, vmax=z_vmax)
-        ax[4, idx].set_xlabel('Steps')
         ax[4, idx].set_ylabel('Feature dimension')
-        ax[4, idx].set_title('Temporal latent variable ($z_t$)')
+        ax[4, idx].set_title('Temporal latent mean ($E[z_t]$)')
         ax[4, idx].set_xticks(xticks)
         ax[4, idx].set_xlim([0, n_timesteps-1])
 
