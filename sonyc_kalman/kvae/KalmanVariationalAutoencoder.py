@@ -1,7 +1,7 @@
 from tensorflow.contrib import slim
 from tensorflow.contrib.layers import optimize_loss
 from .filter import KalmanFilter
-from .utils.plotting import (plot_auxiliary, plot_alpha_grid)
+from .utils.plotting import (plot_auxiliary, plot_alpha_grid, plot_segments)
 from .utils.nn import *
 from tensorflow.contrib.rnn import BasicLSTMCell
 
@@ -480,8 +480,7 @@ class KalmanVariationalAutoencoder(object):
         plot_alpha_grid(alpha_gen, self.config.log_dir + '/alpha_generation_%05d.png' % n)
 
         # We can only show the image for alpha when using a simple neural network
-        if self.config.dim_a == 2 and self.config.fifo_size == 1 and self.config.alpha_rnn == False \
-                and self.config.learn_u == False:
+        if self.config.dim_a == 2 and self.config.fifo_size == 1 and self.config.alpha_rnn == False:
             self.img_alpha_nn(n=n, range_x=(-16, 16), range_y=(-16, 16))
 
     def impute(self, mask_impute, t_init_mask, idx_batch=0, n=99999, plot=True):
@@ -513,11 +512,21 @@ class KalmanVariationalAutoencoder(object):
         a_filtered = self.sess.run(self.model_vars['a_mu_pred_seq'], feed_dict)
         x_filtered = self.sess.run(self.model_vars['x_hat'], {self.model_vars['a_seq']: a_filtered,
                                                               self.ph_steps: self.test_n_timesteps})
+
         if plot:
-            plot_alpha_grid(alpha_reconstr, self.config.log_dir + '/alpha_reconstr_%05d.png' % n)
+            #plot_alpha_grid(alpha_reconstr, self.config.log_dir + '/alpha_reconstr_%05d.png' % n)
+
+            plot_segments(x_true, x_reconstr, a_reconstr, smooth_z, alpha_reconstr,
+                          self.config.log_dir + '/test_imputation_plot_reconstr_%05d.png' % n)
+
+            plot_segments(x_true, x_imputed, a_imputed, smooth_z, alpha_reconstr,
+                          self.config.log_dir + '/test_imputation_plot_imputed_%05d.png' % n)
+
+            plot_segments(x_true, x_filtered, a_filtered, smooth_z, alpha_reconstr,
+                  self.config.log_dir + '/test_imputation_plot_filtered_%05d.png' % n)
 
             # Plot z_mu
-            plot_auxiliary([smooth_z[0]], self.config.log_dir + '/plot_z_mu_smooth_%05d.png' % n)
+            #plot_auxiliary([smooth_z[0]], self.config.log_dir + '/plot_z_mu_smooth_%05d.png' % n)
 
         ###### Sample deterministic generation having access to the first t_init_mask frames for comparison
         # Get initial state z_1
@@ -532,8 +541,11 @@ class KalmanVariationalAutoencoder(object):
                                                              self.ph_steps: self.test_n_timesteps})
 
         if plot:
-            plot_auxiliary([a_reconstr, a_gen_det, a_imputed],
-                           self.config.log_dir + '/plot_imputation_%05d.png' % n)
+            #plot_auxiliary([ a_reconstr, a_gen_det, a_imputed],
+            #               self.config.log_dir + '/plot_imputation_%05d.png' % n)
+            plot_segments(self.test_data[slc][:, 0: t_init_mask], x_gen_det, a_gen_det, smooth_z_gen, alpha_gen_det,
+                          self.config.log_dir + '/test_det_gen_imputation_plot_reconstr_%05d.png' % n)
+
 
         # For a more fair comparison against pure generation only look at time steps with no observed variables
         mask_unobs = mask_impute < 0.5
