@@ -46,8 +46,8 @@ def plot_auxiliary(all_vars, filename, table_size=4):
     plt.close()
 
 
-def plot_segments(x_true_batch, x_hat_batch, a_batch, z_batch, alpha_batch,
-                  filename, table_size=4, wh_ratio=2.5):
+def plot_segments(x_true_batch, x_hat_batch, mask_batch, a_batch, z_batch,
+                  alpha_batch, filename, table_size=4, wh_ratio=2.5):
     batch_size, n_timesteps, x_dim = x_true_batch.shape
     a_dim = a_batch.shape[-1]
     z_dim = z_batch.shape[-1]
@@ -67,7 +67,7 @@ def plot_segments(x_true_batch, x_hat_batch, a_batch, z_batch, alpha_batch,
 
 
     table_size = min(table_size, batch_size)
-    f, ax = plt.subplots(nrows=6, ncols=table_size, figsize=(25, 18))
+    f, ax = plt.subplots(nrows=7, ncols=table_size, figsize=(25, 21))
 
     for idx in range(table_size):
         # Plot ground truth
@@ -79,46 +79,54 @@ def plot_segments(x_true_batch, x_hat_batch, a_batch, z_batch, alpha_batch,
         # Make xticks consistent
         xticks = ax[0, idx].get_xticks()
 
-        # Plot reconstruction
-        ax[1, idx].imshow(x_hat_batch[idx].T, aspect=x_aspect,
-                          cmap='magma', vmin=x_vmin, vmax=x_vmax)
-        ax[1, idx].set_ylabel('Feature dimension')
-        ax[1, idx].set_title('Reconstructed data ($\hat{x}_t$)')
+        # Plot mask
+        ax[1, idx].plot(mask_batch[idx])
+        ax[1, idx].set_ylabel('Mask value')
+        ax[1, idx].set_title('Imputation mask')
+        ax[1, idx].set_ylim([0, 1.1])
         ax[1, idx].set_xticks(xticks)
         ax[1, idx].set_xlim([0, n_timesteps-1])
 
-        # Plot error
-        ax[2, idx].plot(np.linalg.norm(x_true_batch[idx] - x_hat_batch[idx],
-                                       axis=-1, ord=2) ** 2)
-        ax[2, idx].set_ylabel('Squared L2 Error')
-        ax[2, idx].set_title('L2 error between ground truth and reconstruction')
+        # Plot reconstruction
+        ax[2, idx].imshow(x_hat_batch[idx].T, aspect=x_aspect,
+                          cmap='magma', vmin=x_vmin, vmax=x_vmax)
+        ax[2, idx].set_ylabel('Feature dimension')
+        ax[2, idx].set_title('Reconstructed data ($\hat{x}_t$)')
         ax[2, idx].set_xticks(xticks)
         ax[2, idx].set_xlim([0, n_timesteps-1])
 
-        # Plot a_t
-        ax[3, idx].imshow(a_batch[idx].T, aspect=a_aspect,
-                          cmap='magma', vmin=a_vmin, vmax=a_vmax)
-        ax[3, idx].set_ylabel('Feature dimension')
-        ax[3, idx].set_title('Recognition latent variable ($a_t$)')
+        # Plot error
+        ax[3, idx].plot(np.linalg.norm(x_true_batch[idx] - x_hat_batch[idx],
+                                       axis=-1, ord=2) ** 2)
+        ax[3, idx].set_ylabel('Squared L2 Error')
+        ax[3, idx].set_title('L2 error between ground truth and reconstruction')
         ax[3, idx].set_xticks(xticks)
         ax[3, idx].set_xlim([0, n_timesteps-1])
 
-        # Plot z_t
-        ax[4, idx].imshow(z_batch[idx].T, aspect=z_aspect,
-                          cmap='magma', vmin=z_vmin, vmax=z_vmax)
+        # Plot a_t
+        ax[4, idx].imshow(a_batch[idx].T, aspect=a_aspect,
+                          cmap='magma', vmin=a_vmin, vmax=a_vmax)
         ax[4, idx].set_ylabel('Feature dimension')
-        ax[4, idx].set_title('Temporal latent mean ($E[z_t]$)')
+        ax[4, idx].set_title('Recognition latent variable ($a_t$)')
         ax[4, idx].set_xticks(xticks)
         ax[4, idx].set_xlim([0, n_timesteps-1])
 
-        # Plot alpha_t
-        ax[5, idx].plot(alpha_batch[idx])
-        ax[5, idx].set_xlabel('Steps')
-        ax[5, idx].set_ylabel('Mixture weight')
-        ax[5, idx].set_title('Mixture weights over time ($\\alpha^{(k)}_t$)')
-        ax[5, idx].set_ylim([0, 1.1])
+        # Plot z_t
+        ax[5, idx].imshow(z_batch[idx].T, aspect=z_aspect,
+                          cmap='magma', vmin=z_vmin, vmax=z_vmax)
+        ax[5, idx].set_ylabel('Feature dimension')
+        ax[5, idx].set_title('Temporal latent mean ($E[z_t]$)')
         ax[5, idx].set_xticks(xticks)
         ax[5, idx].set_xlim([0, n_timesteps-1])
+
+        # Plot alpha_t
+        ax[6, idx].plot(alpha_batch[idx])
+        ax[6, idx].set_xlabel('Steps')
+        ax[6, idx].set_ylabel('Mixture weight')
+        ax[6, idx].set_title('Mixture weights over time ($\\alpha^{(k)}_t$)')
+        ax[6, idx].set_ylim([0, 1.1])
+        ax[6, idx].set_xticks(xticks)
+        ax[6, idx].set_xlim([0, n_timesteps-1])
 
     plt.savefig(filename, format='png', bbox_inches='tight', dpi=80)
     plt.close()

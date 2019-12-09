@@ -516,13 +516,13 @@ class KalmanVariationalAutoencoder(object):
         if plot:
             #plot_alpha_grid(alpha_reconstr, self.config.log_dir + '/alpha_reconstr_%05d.png' % n)
 
-            plot_segments(x_true, x_reconstr, a_reconstr, smooth_z[0], alpha_reconstr,
+            plot_segments(x_true, x_reconstr, mask_impute, a_reconstr, smooth_z[0], alpha_reconstr,
                           self.config.log_dir + '/test_imputation_plot_reconstr_%05d.png' % n)
 
-            plot_segments(x_true, x_imputed, a_imputed, smooth_z[0], alpha_reconstr,
+            plot_segments(x_true, x_imputed, mask_impute, a_imputed, smooth_z[0], alpha_reconstr,
                           self.config.log_dir + '/test_imputation_plot_imputed_%05d.png' % n)
 
-            plot_segments(x_true, x_filtered, a_filtered, smooth_z[0], alpha_reconstr,
+            plot_segments(x_true, x_filtered, mask_impute, a_filtered, smooth_z[0], alpha_reconstr,
                   self.config.log_dir + '/test_imputation_plot_filtered_%05d.png' % n)
 
             # Plot z_mu
@@ -543,7 +543,7 @@ class KalmanVariationalAutoencoder(object):
         if plot:
             #plot_auxiliary([ a_reconstr, a_gen_det, a_imputed],
             #               self.config.log_dir + '/plot_imputation_%05d.png' % n)
-            plot_segments(x_true, x_gen_det, a_gen_det, smooth_z_gen[0], alpha_gen_det,
+            plot_segments(x_true, x_gen_det, mask_impute, a_gen_det, smooth_z_gen[0], alpha_gen_det,
                           self.config.log_dir + '/test_det_gen_imputation_plot_reconstr_%05d.png' % n)
 
 
