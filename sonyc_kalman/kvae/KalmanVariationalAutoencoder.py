@@ -693,8 +693,7 @@ class KalmanVariationalAutoencoder(object):
         mse_x_imputed = out_res_all[:, 6]
         mse_x_filtered = out_res_all[:, 7]
 
-        results = [(baseline, 'Baseline'),
-                   (mse_x_imputed, 'KVAE smoothing'),
+        results = [(mse_x_imputed, 'KVAE smoothing'),
                    (mse_x_filtered, 'KVAE filtering')]
 
         print(out_res_all)
@@ -702,11 +701,9 @@ class KalmanVariationalAutoencoder(object):
         import matplotlib.pyplot as plt
         mpl.rcParams['xtick.labelsize'] = 14
         mpl.rcParams['ytick.labelsize'] = 14
+        plt.figure(figsize=(7,7))
         for dist, label in results:
-            if label == 'Baseline':
-                linestyle = '--'
-            else:
-                linestyle = '.-'
+            linestyle = '.-'
             plt.plot(vec, dist, linestyle, linewidth=3, ms=20, label=label)
         plt.xlabel(xlab, fontsize=20)
         plt.ylabel('MSE', fontsize=20)

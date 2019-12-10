@@ -88,7 +88,10 @@ def plot_segments(x_true_batch, x_hat_batch, mask_batch, a_batch, z_batch,
         ax[1, idx].set_xlim([0, n_timesteps-1])
 
         # Plot reconstruction
-        ax[2, idx].imshow(x_hat_batch[idx].T, aspect=x_aspect,
+        x_hat = x_hat_batch[idx].copy()
+        mask = mask_batch[idx].astype(int)
+        x_hat[mask] = x_true_batch[idx][mask].copy()
+        ax[2, idx].imshow(x_hat.T, aspect=x_aspect,
                           cmap='magma', vmin=x_vmin, vmax=x_vmax)
         ax[2, idx].set_ylabel('Feature dimension')
         ax[2, idx].set_title('Reconstructed data ($\hat{x}_t$)')
@@ -96,8 +99,7 @@ def plot_segments(x_true_batch, x_hat_batch, mask_batch, a_batch, z_batch,
         ax[2, idx].set_xlim([0, n_timesteps-1])
 
         # Plot error
-        ax[3, idx].plot(np.linalg.norm(x_true_batch[idx] - x_hat_batch[idx],
-                                       axis=-1, ord=2) ** 2)
+        ax[3, idx].plot(np.linalg.norm(x_true_batch[idx] - x_hat, axis=-1, ord=2) ** 2)
         ax[3, idx].set_ylabel('Squared L2 Error')
         ax[3, idx].set_title('L2 error between ground truth and reconstruction')
         ax[3, idx].set_xticks(xticks)
