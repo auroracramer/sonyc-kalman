@@ -342,6 +342,9 @@ class KalmanVariationalAutoencoder(object):
         """
         sess = self.sess
         writer = tf.summary.FileWriter(self.config.log_dir, sess.graph)
+
+        results_path = os.path.join(self.config.log_dir, "results.csv")
+
         num_batches = self.train_n_sequences // self.config.batch_size
         # This code supports training with missing data (if train_miss_prob > 0.0)
         mask_train = np.ones((num_batches, self.config.batch_size, self.train_n_timesteps), dtype=np.float32)
@@ -351,6 +354,14 @@ class KalmanVariationalAutoencoder(object):
                 mask_train[j] = self.mask_impute_random(self.train_n_timesteps,
                                                         t_init_mask=self.config.t_init_train_miss,
                                                         drop_prob=self.config.train_miss_prob)
+
+        fields = ['epoch', 'train_elbo_tot', 'train_elbo_kf', 'train_elbo_vae', 'train_log_px', 'train_log_qa',
+                  'test_elbo_tot', 'test_elbo_kf', 'test_elbo_vae', 'test_log_px', 'test_log_qa']
+        import csv
+
+        with open(results_path, 'w') as f:
+            csv_writer = csv.DictWriter(f, fieldnames=fields)
+            csv_writer.writeheader()
 
         all_summaries = tf.summary.merge_all()
 
@@ -399,6 +410,20 @@ class KalmanVariationalAutoencoder(object):
                          mean_kf_log_probs[2], mean_kf_log_probs[3], np.mean(elbo_vae),
                          time.time() - time_epoch_start))
 
+            row = {
+                'epoch': n,
+                'train_elbo_tot': np.mean(elbo_tot),
+                'train_elbo_kf': np.mean(elbo_kf),
+                'train_elbo_vae': np.mean(elbo_vae),
+                'train_log_px': np.mean(log_px),
+                'train_log_qa': np.mean(log_qa),
+                'test_elbo_tot': float('nan'),
+                'test_elbo_kf': float('nan'),
+                'test_elbo_vae': float('nan'),
+                'test_log_px': float('nan'),
+                'test_log_qa': float('nan'),
+            }
+
             if (((n + 1) % self.config.generate_step == 0) and n > 0) or (n == self.config.num_epochs - 1) or (n == 0):
                 # Impute and calculate error
                 mask_impute = self.mask_impute_planning(self.test_n_timesteps,
@@ -410,8 +435,21 @@ class KalmanVariationalAutoencoder(object):
                 self.generate(n=n)
 
                 # Test on previously unseen data
-                test_elbo, summary_test = self.test()
+                test_vals, summary_test = self.test()
+                test_elbo = test_vals[0]
                 writer.add_summary(summary_test, n)
+
+                row.update({
+                    'test_elbo_tot': test_vals[0],
+                    'test_elbo_kf': test_vals[1],
+                    'test_elbo_vae': test_vals[2],
+                    'test_log_px': test_vals[3],
+                    'test_log_qa': test_vals[4],
+                })
+
+            with open(results_path, 'a') as f:
+                csv_writer = csv.DictWriter(f, fieldnames=fields)
+                csv_writer.writerow(row)
 
         # Save the last model
         self.saver.save(sess, self.config.log_dir + '/model.ckpt')
@@ -445,6 +483,7 @@ class KalmanVariationalAutoencoder(object):
             log_px.append(_log_px)
             log_qa.append(_log_qa)
 
+
         # Write to summary
         summary = self.def_summary('test', elbo_tot, elbo_kf, kf_log_probs, elbo_vae, log_px, log_qa)
         mean_kf_log_probs = np.mean(kf_log_probs, axis=0)
@@ -452,7 +491,15 @@ class KalmanVariationalAutoencoder(object):
               % (np.mean(elbo_tot), mean_kf_log_probs[0], mean_kf_log_probs[1],
                  mean_kf_log_probs[2], mean_kf_log_probs[3], np.mean(elbo_vae),
                  time.time() - time_test_start))
-        return np.mean(elbo_tot), summary
+
+
+        vals = (np.mean(np.array(elbo_tot)),
+                np.mean(np.array(elbo_kf)),
+                np.mean(np.array(elbo_vae)),
+                np.mean(np.array(log_px)),
+                np.mean(np.array(log_qa)))
+
+        return vals, summary
 
     def generate(self, idx_batch=0, n=99999):
         ###### Sample video deterministic ######
