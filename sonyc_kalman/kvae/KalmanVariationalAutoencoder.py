@@ -632,6 +632,79 @@ class KalmanVariationalAutoencoder(object):
                    mse_unobs['smooth'], mse_unobs['filt'], mse_unobs['gen'])
         return out_res
 
+    def impute_sonyc(self, data, test_mask, valid_mask, plot=True):
+        if data.ndim == 2:
+            data = data[np.newaxis, ...]
+
+        n_timesteps = data.shape[1]
+        mask_impute = test_mask * valid_mask
+        feed_dict = {self.x: data,
+                     self.ph_steps: n_timesteps,
+                     self.mask: mask_impute}
+
+        # JTC: This is using straight up tensorflow run to compute variables
+        #      from the feed dict values
+        ##### Compute reconstructions and imputations (smoothing) ######
+        a_imputed, a_reconstr, x_reconstr, alpha_reconstr, smooth_z, filter_z, C_filter = self.sess.run([
+            self.model_vars['a_mu_pred_seq'],
+            self.model_vars['a_vae'],
+            self.model_vars['x_hat'],
+            self.model_vars['alpha_plot'],
+            self.model_vars['smooth'],
+            self.model_vars['filter'],
+            self.model_vars['C_filter']],
+            feed_dict)
+        x_imputed = self.sess.run(self.model_vars['x_hat'], {self.model_vars['a_seq']: a_imputed,
+                                                             self.ph_steps: n_timesteps})
+        x_true = feed_dict[self.x]
+
+        ###### Filtering
+        feed_dict = {self.model_vars['smooth']: filter_z,
+                     self.model_vars['C']: C_filter,
+                     self.ph_steps: n_timesteps}
+        a_filtered = self.sess.run(self.model_vars['a_mu_pred_seq'], feed_dict)
+        x_filtered = self.sess.run(self.model_vars['x_hat'], {self.model_vars['a_seq']: a_filtered,
+                                                              self.ph_steps: n_timesteps})
+
+        if plot:
+            plot_segments(x_true, x_reconstr, mask_impute, a_reconstr, smooth_z[0], alpha_reconstr,
+                          self.config.log_dir + '/test_imputation_plot_reconstr_yeareval.png',
+                          table_size=1, wh_ratio=12)
+
+            plot_segments(x_true, x_imputed, mask_impute, a_imputed, smooth_z[0], alpha_reconstr,
+                          self.config.log_dir + '/test_imputation_plot_imputed_yeareval.png',
+                          table_size=1, wh_ratio=12)
+
+            plot_segments(x_true, x_filtered, mask_impute, a_filtered, smooth_z[0], alpha_reconstr,
+                          self.config.log_dir + '/test_imputation_plot_filtered_yeareval.png',
+                          table_size=1, wh_ratio=12)
+
+        # For a more fair comparison against pure generation only look at time steps with no observed variables
+        mask_unobs = mask_impute < 0.5
+        x_true_unobs = x_true[mask_unobs]
+
+        # Get hamming distance on unobserved variables
+        ham_unobs = dict()
+        mse_unobs = dict()
+        for key, value in zip(('filt', 'smooth'), (x_filtered, x_imputed)):
+            ham_unobs[key] = hamming(x_true_unobs.flatten() > 0.5, value[mask_unobs].flatten() > 0.5)
+            mse_unobs[key] = mse(x_true_unobs, value[mask_unobs])
+
+        # Return results
+        a_reconstr_unobs = a_reconstr[mask_unobs]
+        norm_rmse_a_imputed = norm_rmse(a_imputed[mask_unobs], a_reconstr_unobs)
+
+        if plot:
+            print("Hamming distance. x_imputed: %.5f, x_filtered: %.5f" % (
+                ham_unobs['smooth'], ham_unobs['filt']))
+            print("MSE. x_imputed: %.5f, x_filtered: %.5f" % (
+                mse_unobs['smooth'], mse_unobs['filt']))
+            print("Normalized RMSE. a_imputed: %.3f" % norm_rmse_a_imputed)
+
+        out_res = (ham_unobs['smooth'], ham_unobs['filt'], norm_rmse_a_imputed,
+                   mse_unobs['smooth'], mse_unobs['filt'])
+        return out_res
+
     def img_alpha_nn(self, range_x=(-30, 30), range_y=(-30, 30), N_points=50, n=99999):
         """ Visualise the output of the dynamics parameter network alpha over _a_ when dim_a == 2 and alpha_rnn=False
 
