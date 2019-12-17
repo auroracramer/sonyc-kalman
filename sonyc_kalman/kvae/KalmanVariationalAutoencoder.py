@@ -4,6 +4,7 @@ from .filter import KalmanFilter
 from .utils.plotting import (plot_auxiliary, plot_alpha_grid, plot_segments)
 from .utils.nn import *
 from tensorflow.contrib.rnn import BasicLSTMCell
+import os
 
 import time
 from scipy.spatial.distance import hamming
