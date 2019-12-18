@@ -20,6 +20,23 @@ def reload_config(FLAGS):
     return FLAGS
 
 
+def reload_config(FLAGS, config_dict=None):
+    # If we are reloading a model, overwrite the flags
+    if config_dict is not None or FLAGS.reload_model is not '':
+        if config_dict is None:
+            with open('%s/%s' % (os.path.dirname(FLAGS.reload_model), 'config.json')) as data_file:
+                config_dict = json.load(data_file)
+
+        attr_remove = [
+            'gpu', 'run_name', 'n_steps_gen',
+            'reload_model', 'display_step', 'generate_step'
+        ]
+        for key, value in config_dict.items():
+            if key not in attr_remove:
+                FLAGS.__setattr__(key, value)
+    return FLAGS
+
+
 # JTC: can change this to not "image"
 def get_train_config():
     cl = tf.app.flags

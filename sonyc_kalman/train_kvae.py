@@ -68,7 +68,7 @@ def run():
 
     # Save hyperparameters
     with open(config.log_dir + '/config.json', 'w') as f:
-        json.dump(dict(config.__flags), f)
+        json.dump({k: v.value for k,v in config.__flags.items()}, f)
 
 
     # Set GPU

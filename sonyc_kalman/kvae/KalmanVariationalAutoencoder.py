@@ -635,6 +635,10 @@ class KalmanVariationalAutoencoder(object):
     def impute_sonyc(self, data, test_mask, valid_mask, plot=True):
         if data.ndim == 2:
             data = data[np.newaxis, ...]
+        if test_mask.ndim == 1:
+            test_mask = test_mask[np.newaxis, ...]
+        if valid_mask.ndim == 1:
+            valid_mask = valid_mask[np.newaxis, ...]
 
         n_timesteps = data.shape[1]
         mask_impute = test_mask * valid_mask
@@ -666,28 +670,33 @@ class KalmanVariationalAutoencoder(object):
         x_filtered = self.sess.run(self.model_vars['x_hat'], {self.model_vars['a_seq']: a_filtered,
                                                               self.ph_steps: n_timesteps})
 
+        # JTC: Fix shape for some of these. Apparently it just replicates the
+        #      items across batches
+        a_imputed = a_imputed[0:1, ...]
+        x_imputed = x_imputed[0:1, ...]
+        a_filtered = a_filtered[0:1, ...]
+        x_filtered = x_filtered[0:1, ...]
+
         if plot:
             plot_segments(x_true, x_reconstr, mask_impute, a_reconstr, smooth_z[0], alpha_reconstr,
                           self.config.log_dir + '/test_imputation_plot_reconstr_yeareval.png',
-                          table_size=1, wh_ratio=12)
+                          table_size=1, wh_ratio=10)
 
             plot_segments(x_true, x_imputed, mask_impute, a_imputed, smooth_z[0], alpha_reconstr,
                           self.config.log_dir + '/test_imputation_plot_imputed_yeareval.png',
-                          table_size=1, wh_ratio=12)
+                          table_size=1, wh_ratio=10)
 
             plot_segments(x_true, x_filtered, mask_impute, a_filtered, smooth_z[0], alpha_reconstr,
                           self.config.log_dir + '/test_imputation_plot_filtered_yeareval.png',
-                          table_size=1, wh_ratio=12)
+                          table_size=1, wh_ratio=10)
 
         # For a more fair comparison against pure generation only look at time steps with no observed variables
         mask_unobs = mask_impute < 0.5
         x_true_unobs = x_true[mask_unobs]
 
         # Get hamming distance on unobserved variables
-        ham_unobs = dict()
         mse_unobs = dict()
         for key, value in zip(('filt', 'smooth'), (x_filtered, x_imputed)):
-            ham_unobs[key] = hamming(x_true_unobs.flatten() > 0.5, value[mask_unobs].flatten() > 0.5)
             mse_unobs[key] = mse(x_true_unobs, value[mask_unobs])
 
         # Return results
@@ -695,14 +704,11 @@ class KalmanVariationalAutoencoder(object):
         norm_rmse_a_imputed = norm_rmse(a_imputed[mask_unobs], a_reconstr_unobs)
 
         if plot:
-            print("Hamming distance. x_imputed: %.5f, x_filtered: %.5f" % (
-                ham_unobs['smooth'], ham_unobs['filt']))
             print("MSE. x_imputed: %.5f, x_filtered: %.5f" % (
                 mse_unobs['smooth'], mse_unobs['filt']))
             print("Normalized RMSE. a_imputed: %.3f" % norm_rmse_a_imputed)
 
-        out_res = (ham_unobs['smooth'], ham_unobs['filt'], norm_rmse_a_imputed,
-                   mse_unobs['smooth'], mse_unobs['filt'])
+        out_res = (norm_rmse_a_imputed, mse_unobs['smooth'], mse_unobs['filt'])
         return out_res
 
     def img_alpha_nn(self, range_x=(-30, 30), range_y=(-30, 30), N_points=50, n=99999):

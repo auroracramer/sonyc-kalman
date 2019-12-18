@@ -67,7 +67,7 @@ def plot_segments(x_true_batch, x_hat_batch, mask_batch, a_batch, z_batch,
 
 
     table_size = min(table_size, batch_size)
-    f, ax = plt.subplots(nrows=7, ncols=table_size, figsize=(25, 21))
+    f, ax = plt.subplots(nrows=7, ncols=table_size, figsize=(25, 21), squeeze=False)
 
     for idx in range(table_size):
         # Plot ground truth
