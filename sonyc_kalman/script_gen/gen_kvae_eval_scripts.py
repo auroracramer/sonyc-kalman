@@ -47,7 +47,7 @@ def start_sbatch_file(script_name, sbatch_dir, sbatch_idx):
     f.write("#SBATCH --tasks-per-node=1\n")
 
     f.write("#SBATCH --cpus-per-task={}\n".format(cpus_per_task))
-    f.write("#SBATCH --time=12:00:00\n")
+    f.write("#SBATCH --time=1:30:00\n")
     f.write("#SBATCH --mem={}GB\n".format(mem_gb))
 #    f.write("#SBATCH --output=\"" + \
 #            os.path.join(os.path.abspath(slurm_dir),
@@ -89,8 +89,12 @@ for exp_hash in os.listdir(output_dir):
     exp_dir = os.path.join(exp_dir, timestamp)
 
     results_path = os.path.join(exp_dir, 'results.csv')
+    imputation_results_path = os.path.join(exp_dir, 'imputation_results.json')
 
     if not os.path.exists(results_path):
+        continue
+
+    if os.path.exists(imputation_results_path):
         continue
 
     results = pd.read_csv(results_path)

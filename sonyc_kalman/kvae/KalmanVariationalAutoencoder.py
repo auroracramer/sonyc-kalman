@@ -708,17 +708,10 @@ class KalmanVariationalAutoencoder(object):
                 mse_unobs['smooth'], mse_unobs['filt']))
             print("Normalized RMSE. a_imputed: %.3f" % norm_rmse_a_imputed)
 
-        if return_output:
+        if not return_output:
             out_res = (norm_rmse_a_imputed, mse_unobs['smooth'], mse_unobs['filt'])
             return out_res
         else:
-            if smooth_z[0].shape[0] > 1:
-                smooth_z[0] = smooth_z[0][0:1, ...]
-                smooth_z[1] = smooth_z[1][0:1, ...]
-            if filter_z[0].shape[0] > 1:
-                filter_z[0] = filter_z[0][0:1, ...]
-                filter_z[1] = filter_z[1][0:1, ...]
-
             out_res = (norm_rmse_a_imputed, mse_unobs['smooth'], mse_unobs['filt'],
                        x_filtered, x_imputed, a_filtered, a_imputed,
                        filter_z, smooth_z, alpha_reconstr)
