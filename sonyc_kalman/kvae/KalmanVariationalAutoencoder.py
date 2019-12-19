@@ -720,7 +720,8 @@ class KalmanVariationalAutoencoder(object):
                 filter_z[1] = filter_z[1][0:1, ...]
 
             out_res = (norm_rmse_a_imputed, mse_unobs['smooth'], mse_unobs['filt'],
-                       x_filtered, x_imputed, a_filtered, a_imputed, filter_z, smooth_z)
+                       x_filtered, x_imputed, a_filtered, a_imputed,
+                       filter_z, smooth_z, alpha_reconstr)
             return out_res
 
     def img_alpha_nn(self, range_x=(-30, 30), range_y=(-30, 30), N_points=50, n=99999):
