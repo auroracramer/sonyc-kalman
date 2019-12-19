@@ -1,11 +1,17 @@
 import argparse
 import datetime
+import itertools
+import operator
 import os
 import pandas as pd
 import h5py
 import numpy as np
+import librosa
 
-from . import data_aggr
+try:
+    import data_aggr
+except:
+    from . import data_aggr
 
 
 def load_openl3_time_series(hdf5_path, delta_mins=15, aggr_func=None):
@@ -82,15 +88,15 @@ def series_splitter(mask_length, test_ratio=0.25, mode='random_holes', hole_mean
             the fraction of the data to be split out as test
         mode: str
             should be one of 'random_holes', 'r', 'chronological', or 'c'.
-            'random_holes' - punch_out randomly (Guassian according to `hole_param`) sized holes in the series and 
+            'random_holes' - punch_out randomly (Guassian according to `hole_param`) sized holes in the series and
             set aside as test.
             'chronological' - just use the begining as train and the end as test, modeling real world delopyment.
             hole_param in chronological mode is ignored.
         hole_mean: positive number
-            used for the 'random_holes' mode and ignored otherwise. Specify the mean of the normal distribution from 
+            used for the 'random_holes' mode and ignored otherwise. Specify the mean of the normal distribution from
             which the size of the hole is drawn.
         hole_std: positive number
-            used for the 'random_holes' mode and ignored otherwise. Specify the mean of the normal distribution from 
+            used for the 'random_holes' mode and ignored otherwise. Specify the mean of the normal distribution from
             which the size of the hole is drawn.
         min_hole_size: positive number
             used for the 'random_holes' mode and ignored otherwise. size of the minimal hole.
@@ -110,12 +116,12 @@ def series_splitter(mask_length, test_ratio=0.25, mode='random_holes', hole_mean
         chrono_mode = False
     else:
         raise ValueError("type must be one of 'random_holes', 'r', 'chronological', or 'c'.")
-    
+
     np.random.seed(random_state)
 
     n_test = int(round(test_ratio * mask_length))
     n_train = mask_length - n_test
-    
+
     # build test_mask as list
     test_mask = list()
     if chrono_mode:
@@ -152,6 +158,106 @@ def series_splitter(mask_length, test_ratio=0.25, mode='random_holes', hole_mean
     train_mask = 1 - test_mask
 
     return train_mask, test_mask
+
+
+def mask_to_segment_idxs(mask):
+    '''
+    Given a `mask`, return a list of arrays of indices for contiguous unmasked segments.
+
+    Params:
+    -------
+        mask: np.array
+            array of mask values
+
+    Returns:
+    --------
+        segment_idxs_list: list of np.array of int's
+            a list of arrays of indices for contigulous unmasked segments
+    '''
+    segment_idxs_list = []
+    for key, it in itertools.groupby(enumerate(mask), key=operator.itemgetter(1)):
+        # Skip masked values
+        if key:
+            continue
+
+        segment_idxs_list.append(np.array(list(zip(*it))[0]))
+
+    return segment_idxs_list
+
+
+def construct_kvae_data(X, invalid_mask, subset_mask, n_timesteps=24, hop_length=6, random_state=0, test=False):
+    '''
+    Constructs KVAE friendly input matrix out of data matrix `X` and mask array `invalid_mask`.
+
+    Each contiguous segment in `X` (as specified by `mask`) is divided into examples
+    of size `n_timesteps` with a hop length of `hop_length`. Padding is performed
+    to ensure that all frames are accounted for.
+
+    Params:
+    -------
+        X: np.array of shape (num_frames, feature_dim)
+            data matrix
+        invalid_mask: np.array
+            array of invalid mask values
+        subset_mask: np.array
+            array of mask values for the given subset
+        n_timesteps: int
+            number of frames per training example
+        hop_length: int
+            hop size for dividing each sequence into examples
+        random_state: int
+            for reproducability
+        test: bool
+            If true, do not split segments into frames
+
+
+    Returns:
+    --------
+        X_frames: np.array of shape (num_examples, `n_timesteps`, feature_dim)
+            array of training data suitable for input in KVAE model
+        mask_frames: np.array of shape (num_examples, `n_timesteps`)
+            array of mask values suitable for input in KVAE model
+    '''
+    X_list = []
+    mask_list = []
+
+    seg_idxs_list = mask_to_segment_idxs(subset_mask)
+    max_seg_len = max([len(x) for x in seg_idxs_list])
+
+    for seg_idxs in seg_idxs_list:
+        # Extract the current segment
+        X_seg = X[seg_idxs, :]
+        mask_seg = invalid_mask[seg_idxs]
+
+        num_frames = len(seg_idxs)
+        if not test:
+            pad_length = max(0, int(np.ceil((num_frames - n_timesteps)/hop_length))*hop_length) + n_timesteps - num_frames
+        else:
+            pad_length = max_seg_len - num_frames
+
+        if pad_length > 0:
+            # Pad the segment so we don't lose any frames
+            X_seg = np.pad(X_seg, ((0, pad_length), (0,0)), mode='constant')
+            # Padding is with ones for the mask
+            mask_seg = np.pad(mask_seg, (0, pad_length), mode='constant', constant_values=1)
+
+        if not test:
+            # Divide segment into frames
+            X_seg_frames = librosa.util.frame(X_seg, frame_length=n_timesteps, hop_length=hop_length, axis=0)
+            mask_seg_frames = librosa.util.frame(mask_seg, frame_length=n_timesteps, hop_length=hop_length).T
+        else:
+            X_seg_frames = X_seg[np.newaxis, ...]
+            mask_seg_frames = mask_seg[np.newaxis, ...]
+
+        # Accumulate current segment batches
+        X_list.append(X_seg_frames)
+        mask_list.append(mask_seg_frames)
+
+    X_list = np.concatenate(X_list, axis=0)
+    mask_list = np.concatenate(mask_list, axis=0)
+    shuffle_idxs = np.random.permutation(X_list.shape[0])
+
+    return X_list[shuffle_idxs], mask_list[shuffle_idxs]
 
 
 if __name__ == '__main__':

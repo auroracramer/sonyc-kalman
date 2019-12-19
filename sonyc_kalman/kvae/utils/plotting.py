@@ -46,6 +46,93 @@ def plot_auxiliary(all_vars, filename, table_size=4):
     plt.close()
 
 
+def plot_segments(x_true_batch, x_hat_batch, mask_batch, a_batch, z_batch,
+                  alpha_batch, filename, table_size=4, wh_ratio=2.5):
+    batch_size, n_timesteps, x_dim = x_true_batch.shape
+    a_dim = a_batch.shape[-1]
+    z_dim = z_batch.shape[-1]
+
+    x_aspect = (n_timesteps / x_dim) / wh_ratio
+    a_aspect = (n_timesteps / a_dim) / wh_ratio
+    z_aspect = (n_timesteps / z_dim) / wh_ratio
+
+    x_vmin = min(x_true_batch.min(), x_hat_batch.min())
+    x_vmax = max(x_true_batch.max(), x_hat_batch.max())
+
+    a_vmin = a_batch.min()
+    a_vmax = a_batch.max()
+
+    z_vmin = z_batch.min()
+    z_vmax = z_batch.max()
+
+
+    table_size = min(table_size, batch_size)
+    f, ax = plt.subplots(nrows=7, ncols=table_size, figsize=(25, 21), squeeze=False)
+
+    for idx in range(table_size):
+        # Plot ground truth
+        ax[0, idx].imshow(x_true_batch[idx].T, aspect=x_aspect,
+                          cmap='magma', vmin=x_vmin, vmax=x_vmax)
+        ax[0, idx].set_ylabel('Data dimension')
+        ax[0, idx].set_title('Ground truth data ($x_t$)')
+
+        # Make xticks consistent
+        xticks = ax[0, idx].get_xticks()
+
+        # Plot mask
+        ax[1, idx].plot(mask_batch[idx])
+        ax[1, idx].set_ylabel('Mask value')
+        ax[1, idx].set_title('Imputation mask')
+        ax[1, idx].set_ylim([0, 1.1])
+        ax[1, idx].set_xticks(xticks)
+        ax[1, idx].set_xlim([0, n_timesteps-1])
+
+        # Plot reconstruction
+        x_hat = x_hat_batch[idx].copy()
+        mask = mask_batch[idx].astype(int)
+        x_hat[mask] = x_true_batch[idx][mask].copy()
+        ax[2, idx].imshow(x_hat.T, aspect=x_aspect,
+                          cmap='magma', vmin=x_vmin, vmax=x_vmax)
+        ax[2, idx].set_ylabel('Feature dimension')
+        ax[2, idx].set_title('Reconstructed data ($\hat{x}_t$)')
+        ax[2, idx].set_xticks(xticks)
+        ax[2, idx].set_xlim([0, n_timesteps-1])
+
+        # Plot error
+        ax[3, idx].plot(np.linalg.norm(x_true_batch[idx] - x_hat, axis=-1, ord=2) ** 2)
+        ax[3, idx].set_ylabel('Squared L2 Error')
+        ax[3, idx].set_title('L2 error between ground truth and reconstruction')
+        ax[3, idx].set_xticks(xticks)
+        ax[3, idx].set_xlim([0, n_timesteps-1])
+
+        # Plot a_t
+        ax[4, idx].imshow(a_batch[idx].T, aspect=a_aspect,
+                          cmap='magma', vmin=a_vmin, vmax=a_vmax)
+        ax[4, idx].set_ylabel('Feature dimension')
+        ax[4, idx].set_title('Recognition latent variable ($a_t$)')
+        ax[4, idx].set_xticks(xticks)
+        ax[4, idx].set_xlim([0, n_timesteps-1])
+
+        # Plot z_t
+        ax[5, idx].imshow(z_batch[idx].T, aspect=z_aspect,
+                          cmap='magma', vmin=z_vmin, vmax=z_vmax)
+        ax[5, idx].set_ylabel('Feature dimension')
+        ax[5, idx].set_title('Temporal latent mean ($E[z_t]$)')
+        ax[5, idx].set_xticks(xticks)
+        ax[5, idx].set_xlim([0, n_timesteps-1])
+
+        # Plot alpha_t
+        ax[6, idx].plot(alpha_batch[idx])
+        ax[6, idx].set_xlabel('Steps')
+        ax[6, idx].set_ylabel('Mixture weight')
+        ax[6, idx].set_title('Mixture weights over time ($\\alpha^{(k)}_t$)')
+        ax[6, idx].set_ylim([0, 1.1])
+        ax[6, idx].set_xticks(xticks)
+        ax[6, idx].set_xlim([0, n_timesteps-1])
+
+    plt.savefig(filename, format='png', bbox_inches='tight', dpi=80)
+    plt.close()
+
 def plot_alpha(alpha, filename, idx=0):
     fig = plt.figure(figsize=[6, 6])
     ax = fig.gca()
@@ -70,6 +157,8 @@ def plot_alpha_grid(alpha, filename, table_size=4, idx=0):
             for i in range(alpha.shape[-1]):
                 ax[x, y].plot(alpha[idx, :, i], linestyle='-', marker='o', markersize=3)
                 ax[x, y].set_ylim([-0.01, 1.01])
+                ax[x, y].set_xlabel('Steps')
+                ax[x, y].set_ylabel('Mixture weight')
             idx += 1
     plt.savefig(filename, format='png', bbox_inches='tight', dpi=80)
     plt.close()

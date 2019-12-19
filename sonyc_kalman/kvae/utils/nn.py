@@ -62,6 +62,10 @@ def norm_rmse(predictions, targets):
     return norm_rmse
 
 
+def mse(predictions, targets):
+    return ((predictions - targets) ** 2).sum(axis=-1).mean()
+
+
 def get_activation_fn(name):
     # Get activation function for hidden layers
     if name.lower() == 'relu':

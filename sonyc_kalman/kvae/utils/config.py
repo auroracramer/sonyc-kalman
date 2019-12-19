@@ -20,14 +20,32 @@ def reload_config(FLAGS):
     return FLAGS
 
 
+def reload_config(FLAGS, config_dict=None):
+    # If we are reloading a model, overwrite the flags
+    if config_dict is not None or FLAGS.reload_model is not '':
+        if config_dict is None:
+            with open('%s/%s' % (os.path.dirname(FLAGS.reload_model), 'config.json')) as data_file:
+                config_dict = json.load(data_file)
+
+        attr_remove = [
+            'gpu', 'run_name', 'n_steps_gen',
+            'reload_model', 'display_step', 'generate_step'
+        ]
+        for key, value in config_dict.items():
+            if key not in attr_remove:
+                FLAGS.__setattr__(key, value)
+    return FLAGS
+
+
 # JTC: can change this to not "image"
 def get_train_config():
     cl = tf.app.flags
 
     # Choose data set
     # JTC: Change these default paths
-    cl.DEFINE_string('train_data', '', 'Select data set') # 'box_rnd', 'box_gravity', 'polygon' or 'pong'
-    cl.DEFINE_string('test_data', '', 'Select data set') # 'box_rnd', 'box_gravity', 'polygon' or 'pong'
+    cl.DEFINE_string('data_path', '', 'Select data set')
+    cl.DEFINE_string('train_mask_path', '', 'Select train mask')
+    cl.DEFINE_string('test_mask_path', '', 'Select test mask')
 
     # VAE config
     cl.DEFINE_string('out_distr', 'bernoulli', 'Output distibution')
@@ -56,6 +74,8 @@ def get_train_config():
 
     # Training config
     cl.DEFINE_integer('batch_size', 32, 'Size of mini batches')
+    cl.DEFINE_integer('n_timesteps', 32, 'Size of example sequences')
+    cl.DEFINE_integer('hop_length', 16, 'Hop length for dividing sequences into example subsequences')
     cl.DEFINE_float('init_lr', 0.007, 'Starter learning rate')
     cl.DEFINE_float('init_kf_matrices', 0.05, 'Standard deviation of noise used to initialize B and C')
     cl.DEFINE_float('max_grad_norm', 150.0, 'Gradient norm clipping')

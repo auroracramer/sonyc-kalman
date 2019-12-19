@@ -1,9 +1,10 @@
 from tensorflow.contrib import slim
 from tensorflow.contrib.layers import optimize_loss
 from .filter import KalmanFilter
-from .utils.plotting import (plot_auxiliary, plot_alpha_grid)
+from .utils.plotting import (plot_auxiliary, plot_alpha_grid, plot_segments)
 from .utils.nn import *
 from tensorflow.contrib.rnn import BasicLSTMCell
+import os
 
 import time
 from scipy.spatial.distance import hamming
@@ -20,13 +21,15 @@ np.random.seed(1337)
 class KalmanVariationalAutoencoder(object):
     """ This class defines functions to build, train and evaluate Kalman Variational Autoencoders
     """
-    def __init__(self, train_data, test_data, config, sess):
+    def __init__(self, train_data, test_data, train_mask, test_mask, config, sess):
         self.config = config
 
         # Load the dataset
         self.train_data = train_data
+        self.train_mask = np.logical_not(train_mask) # This module uses the opposite convention of `np.ma`
         self.train_n_sequences, self.train_n_timesteps, self.emb_dim = train_data.shape
         self.test_data = test_data
+        self.test_mask = np.logical_not(test_mask) # This module uses the opposite convention of `np.ma`
         self.test_n_sequences, self.test_n_timesteps, test_emb_dim = test_data.shape
         assert self.emb_dim == test_emb_dim
 
@@ -340,14 +343,27 @@ class KalmanVariationalAutoencoder(object):
         """
         sess = self.sess
         writer = tf.summary.FileWriter(self.config.log_dir, sess.graph)
+
+        results_path = os.path.join(self.config.log_dir, "results.csv")
+
         num_batches = self.train_n_sequences // self.config.batch_size
         # This code supports training with missing data (if train_miss_prob > 0.0)
         mask_train = np.ones((num_batches, self.config.batch_size, self.train_n_timesteps), dtype=np.float32)
         if self.config.train_miss_prob > 0.0:
             # Always use the same mask for each sequence during training
             for j in range(num_batches):
-                mask_train[j] = self.mask_impute_random(t_init_mask=self.config.t_init_train_miss,
+                mask_train[j] = self.mask_impute_random(self.train_n_timesteps,
+                                                        t_init_mask=self.config.t_init_train_miss,
                                                         drop_prob=self.config.train_miss_prob)
+
+        fields = ['epoch', 'train_elbo_tot', 'train_elbo_kf', 'train_elbo_vae', 'train_log_px', 'train_log_qa',
+                  'test_elbo_tot', 'test_elbo_kf', 'test_elbo_vae', 'test_log_px', 'test_log_qa']
+        import csv
+
+        with open(results_path, 'w') as f:
+            csv_writer = csv.DictWriter(f, fieldnames=fields)
+            csv_writer.writeheader()
+
         all_summaries = tf.summary.merge_all()
 
         for n in range(self.config.num_epochs):
@@ -361,7 +377,7 @@ class KalmanVariationalAutoencoder(object):
             for i in range(num_batches):
                 slc = slice(i * self.config.batch_size, (i + 1) * self.config.batch_size)
                 feed_dict = {self.x: self.train_data[slc],
-                             self.mask: mask_train[i],
+                             self.mask: np.logical_and(mask_train[i], self.train_mask[slc]), # JTC: logical and with given mask
                              self.ph_steps: self.train_n_timesteps,
                              self.scale_reconstruction: self.config.scale_reconstruction}
 
@@ -395,9 +411,24 @@ class KalmanVariationalAutoencoder(object):
                          mean_kf_log_probs[2], mean_kf_log_probs[3], np.mean(elbo_vae),
                          time.time() - time_epoch_start))
 
+            row = {
+                'epoch': n,
+                'train_elbo_tot': np.mean(elbo_tot),
+                'train_elbo_kf': np.mean(elbo_kf),
+                'train_elbo_vae': np.mean(elbo_vae),
+                'train_log_px': np.mean(log_px),
+                'train_log_qa': np.mean(log_qa),
+                'test_elbo_tot': float('nan'),
+                'test_elbo_kf': float('nan'),
+                'test_elbo_vae': float('nan'),
+                'test_log_px': float('nan'),
+                'test_log_qa': float('nan'),
+            }
+
             if (((n + 1) % self.config.generate_step == 0) and n > 0) or (n == self.config.num_epochs - 1) or (n == 0):
                 # Impute and calculate error
-                mask_impute = self.mask_impute_planning(t_init_mask=self.config.t_init_mask,
+                mask_impute = self.mask_impute_planning(self.test_n_timesteps,
+                                                        t_init_mask=self.config.t_init_mask,
                                                         t_steps_mask=self.config.t_steps_mask)
                 out_res = self.impute(mask_impute, t_init_mask=self.config.t_init_mask, n=n)
 
@@ -405,8 +436,21 @@ class KalmanVariationalAutoencoder(object):
                 self.generate(n=n)
 
                 # Test on previously unseen data
-                test_elbo, summary_test = self.test()
+                test_vals, summary_test = self.test()
+                test_elbo = test_vals[0]
                 writer.add_summary(summary_test, n)
+
+                row.update({
+                    'test_elbo_tot': test_vals[0],
+                    'test_elbo_kf': test_vals[1],
+                    'test_elbo_vae': test_vals[2],
+                    'test_log_px': test_vals[3],
+                    'test_log_qa': test_vals[4],
+                })
+
+            with open(results_path, 'a') as f:
+                csv_writer = csv.DictWriter(f, fieldnames=fields)
+                csv_writer.writerow(row)
 
         # Save the last model
         self.saver.save(sess, self.config.log_dir + '/model.ckpt')
@@ -427,7 +471,7 @@ class KalmanVariationalAutoencoder(object):
         for i in range(self.test_n_sequences // self.config.batch_size):
             slc = slice(i * self.config.batch_size, (i + 1) * self.config.batch_size)
             feed_dict = {self.x: self.test_data[slc],
-                         self.mask: mask_test,
+                         self.mask: np.logical_and(mask_test, self.test_mask[slc]),
                          self.ph_steps: self.test_n_timesteps,
                          self.scale_reconstruction: 1.0}
 
@@ -440,6 +484,7 @@ class KalmanVariationalAutoencoder(object):
             log_px.append(_log_px)
             log_qa.append(_log_qa)
 
+
         # Write to summary
         summary = self.def_summary('test', elbo_tot, elbo_kf, kf_log_probs, elbo_vae, log_px, log_qa)
         mean_kf_log_probs = np.mean(kf_log_probs, axis=0)
@@ -447,7 +492,15 @@ class KalmanVariationalAutoencoder(object):
               % (np.mean(elbo_tot), mean_kf_log_probs[0], mean_kf_log_probs[1],
                  mean_kf_log_probs[2], mean_kf_log_probs[3], np.mean(elbo_vae),
                  time.time() - time_test_start))
-        return np.mean(elbo_tot), summary
+
+
+        vals = (np.mean(np.array(elbo_tot)),
+                np.mean(np.array(elbo_kf)),
+                np.mean(np.array(elbo_vae)),
+                np.mean(np.array(log_px)),
+                np.mean(np.array(log_qa)))
+
+        return vals, summary
 
     def generate(self, idx_batch=0, n=99999):
         ###### Sample video deterministic ######
@@ -456,7 +509,7 @@ class KalmanVariationalAutoencoder(object):
         slc = slice(idx_batch * self.config.batch_size, (idx_batch + 1) * self.config.batch_size)
         feed_dict = {self.x: self.test_data[slc],
                      self.ph_steps: self.test_n_timesteps,
-                     self.mask: mask_test}
+                     self.mask: np.logical_and(mask_test, self.test_mask[slc])}
         smooth_z = self.sess.run(self.model_vars['smooth'], feed_dict)
 
         # Sample deterministic generation
@@ -477,8 +530,7 @@ class KalmanVariationalAutoencoder(object):
         plot_alpha_grid(alpha_gen, self.config.log_dir + '/alpha_generation_%05d.png' % n)
 
         # We can only show the image for alpha when using a simple neural network
-        if self.config.dim_a == 2 and self.config.fifo_size == 1 and self.config.alpha_rnn == False \
-                and self.config.learn_u == False:
+        if self.config.dim_a == 2 and self.config.fifo_size == 1 and self.config.alpha_rnn == False:
             self.img_alpha_nn(n=n, range_x=(-16, 16), range_y=(-16, 16))
 
     def impute(self, mask_impute, t_init_mask, idx_batch=0, n=99999, plot=True):
@@ -510,11 +562,21 @@ class KalmanVariationalAutoencoder(object):
         a_filtered = self.sess.run(self.model_vars['a_mu_pred_seq'], feed_dict)
         x_filtered = self.sess.run(self.model_vars['x_hat'], {self.model_vars['a_seq']: a_filtered,
                                                               self.ph_steps: self.test_n_timesteps})
+
         if plot:
-            plot_alpha_grid(alpha_reconstr, self.config.log_dir + '/alpha_reconstr_%05d.png' % n)
+            #plot_alpha_grid(alpha_reconstr, self.config.log_dir + '/alpha_reconstr_%05d.png' % n)
+
+            plot_segments(x_true, x_reconstr, mask_impute, a_reconstr, smooth_z[0], alpha_reconstr,
+                          self.config.log_dir + '/test_imputation_plot_reconstr_%05d.png' % n)
+
+            plot_segments(x_true, x_imputed, mask_impute, a_imputed, smooth_z[0], alpha_reconstr,
+                          self.config.log_dir + '/test_imputation_plot_imputed_%05d.png' % n)
+
+            plot_segments(x_true, x_filtered, mask_impute, a_filtered, smooth_z[0], alpha_reconstr,
+                  self.config.log_dir + '/test_imputation_plot_filtered_%05d.png' % n)
 
             # Plot z_mu
-            plot_auxiliary([smooth_z[0]], self.config.log_dir + '/plot_z_mu_smooth_%05d.png' % n)
+            #plot_auxiliary([smooth_z[0]], self.config.log_dir + '/plot_z_mu_smooth_%05d.png' % n)
 
         ###### Sample deterministic generation having access to the first t_init_mask frames for comparison
         # Get initial state z_1
@@ -529,8 +591,11 @@ class KalmanVariationalAutoencoder(object):
                                                              self.ph_steps: self.test_n_timesteps})
 
         if plot:
-            plot_auxiliary([a_reconstr, a_gen_det, a_imputed],
-                           self.config.log_dir + '/plot_imputation_%05d.png' % n)
+            #plot_auxiliary([ a_reconstr, a_gen_det, a_imputed],
+            #               self.config.log_dir + '/plot_imputation_%05d.png' % n)
+            plot_segments(x_true, x_gen_det, mask_impute, a_gen_det, smooth_z_gen[0], alpha_gen_det,
+                          self.config.log_dir + '/test_det_gen_imputation_plot_reconstr_%05d.png' % n)
+
 
         # For a more fair comparison against pure generation only look at time steps with no observed variables
         mask_unobs = mask_impute < 0.5
@@ -538,8 +603,10 @@ class KalmanVariationalAutoencoder(object):
 
         # Get hamming distance on unobserved variables
         ham_unobs = dict()
+        mse_unobs = dict()
         for key, value in zip(('gen', 'filt', 'smooth'), (x_gen_det, x_filtered, x_imputed)):
             ham_unobs[key] = hamming(x_true_unobs.flatten() > 0.5, value[mask_unobs].flatten() > 0.5)
+            mse_unobs[key] = mse(x_true_unobs, value[mask_unobs])
 
         # Baseline is considered as the biggest hamming distance between two frames in the data
         hamming_baseline = 0.0
@@ -556,10 +623,92 @@ class KalmanVariationalAutoencoder(object):
         if plot:
             print("Hamming distance. x_imputed: %.5f, x_filtered: %.5f, x_gen_det: %.5f, baseline: %.5f. " % (
                 ham_unobs['smooth'], ham_unobs['filt'], ham_unobs['gen'], hamming_baseline))
+            print("MSE. x_imputed: %.5f, x_filtered: %.5f, x_gen_det: %.5f. " % (
+                mse_unobs['smooth'], mse_unobs['filt'], mse_unobs['gen']))
             print("Normalized RMSE. a_imputed: %.3f, a_gen_det: %.3f" % (norm_rmse_a_imputed, norm_rmse_a_gen_det))
 
         out_res = (ham_unobs['smooth'], ham_unobs['filt'], ham_unobs['gen'],
-                   hamming_baseline, norm_rmse_a_imputed, norm_rmse_a_gen_det)
+                   hamming_baseline, norm_rmse_a_imputed, norm_rmse_a_gen_det,
+                   mse_unobs['smooth'], mse_unobs['filt'], mse_unobs['gen'])
+        return out_res
+
+    def impute_sonyc(self, data, test_mask, valid_mask, plot=True):
+        if data.ndim == 2:
+            data = data[np.newaxis, ...]
+        if test_mask.ndim == 1:
+            test_mask = test_mask[np.newaxis, ...]
+        if valid_mask.ndim == 1:
+            valid_mask = valid_mask[np.newaxis, ...]
+
+        n_timesteps = data.shape[1]
+        mask_impute = test_mask * valid_mask
+        feed_dict = {self.x: data,
+                     self.ph_steps: n_timesteps,
+                     self.mask: mask_impute}
+
+        # JTC: This is using straight up tensorflow run to compute variables
+        #      from the feed dict values
+        ##### Compute reconstructions and imputations (smoothing) ######
+        a_imputed, a_reconstr, x_reconstr, alpha_reconstr, smooth_z, filter_z, C_filter = self.sess.run([
+            self.model_vars['a_mu_pred_seq'],
+            self.model_vars['a_vae'],
+            self.model_vars['x_hat'],
+            self.model_vars['alpha_plot'],
+            self.model_vars['smooth'],
+            self.model_vars['filter'],
+            self.model_vars['C_filter']],
+            feed_dict)
+        x_imputed = self.sess.run(self.model_vars['x_hat'], {self.model_vars['a_seq']: a_imputed,
+                                                             self.ph_steps: n_timesteps})
+        x_true = feed_dict[self.x]
+
+        ###### Filtering
+        feed_dict = {self.model_vars['smooth']: filter_z,
+                     self.model_vars['C']: C_filter,
+                     self.ph_steps: n_timesteps}
+        a_filtered = self.sess.run(self.model_vars['a_mu_pred_seq'], feed_dict)
+        x_filtered = self.sess.run(self.model_vars['x_hat'], {self.model_vars['a_seq']: a_filtered,
+                                                              self.ph_steps: n_timesteps})
+
+        # JTC: Fix shape for some of these. Apparently it just replicates the
+        #      items across batches
+        a_imputed = a_imputed[0:1, ...]
+        x_imputed = x_imputed[0:1, ...]
+        a_filtered = a_filtered[0:1, ...]
+        x_filtered = x_filtered[0:1, ...]
+
+        if plot:
+            plot_segments(x_true, x_reconstr, mask_impute, a_reconstr, smooth_z[0], alpha_reconstr,
+                          self.config.log_dir + '/test_imputation_plot_reconstr_yeareval.png',
+                          table_size=1, wh_ratio=10)
+
+            plot_segments(x_true, x_imputed, mask_impute, a_imputed, smooth_z[0], alpha_reconstr,
+                          self.config.log_dir + '/test_imputation_plot_imputed_yeareval.png',
+                          table_size=1, wh_ratio=10)
+
+            plot_segments(x_true, x_filtered, mask_impute, a_filtered, smooth_z[0], alpha_reconstr,
+                          self.config.log_dir + '/test_imputation_plot_filtered_yeareval.png',
+                          table_size=1, wh_ratio=10)
+
+        # For a more fair comparison against pure generation only look at time steps with no observed variables
+        mask_unobs = mask_impute < 0.5
+        x_true_unobs = x_true[mask_unobs]
+
+        # Get hamming distance on unobserved variables
+        mse_unobs = dict()
+        for key, value in zip(('filt', 'smooth'), (x_filtered, x_imputed)):
+            mse_unobs[key] = mse(x_true_unobs, value[mask_unobs])
+
+        # Return results
+        a_reconstr_unobs = a_reconstr[mask_unobs]
+        norm_rmse_a_imputed = norm_rmse(a_imputed[mask_unobs], a_reconstr_unobs)
+
+        if plot:
+            print("MSE. x_imputed: %.5f, x_filtered: %.5f" % (
+                mse_unobs['smooth'], mse_unobs['filt']))
+            print("Normalized RMSE. a_imputed: %.3f" % norm_rmse_a_imputed)
+
+        out_res = (norm_rmse_a_imputed, mse_unobs['smooth'], mse_unobs['filt'])
         return out_res
 
     def img_alpha_nn(self, range_x=(-30, 30), range_y=(-30, 30), N_points=50, n=99999):
@@ -594,26 +743,26 @@ class KalmanVariationalAutoencoder(object):
         plt.savefig(self.config.log_dir + '/image_alpha_%05d.png' % n, format='png', bbox_inches='tight', dpi=80)
         plt.close()
 
-    def mask_impute_planning(self, t_init_mask=4, t_steps_mask=12):
+    def mask_impute_planning(self, n_timesteps, t_init_mask=4, t_steps_mask=12):
         """ Create mask with missing values in the middle of the sequence
         :param t_init_mask: observed steps in the beginning of the sequence
         :param t_steps_mask: observed steps in the end
         :return: np.ndarray
         """
-        mask_impute = np.ones((self.config.batch_size, self.test_n_timesteps), dtype=np.float32)
+        mask_impute = np.ones((self.config.batch_size, n_timesteps), dtype=np.float32)
         t_end_mask = t_init_mask + t_steps_mask
         mask_impute[:, t_init_mask: t_end_mask] = 0.0
         return mask_impute
 
-    def mask_impute_random(self, t_init_mask=4, drop_prob=0.5):
+    def mask_impute_random(self, n_timesteps, t_init_mask=4, drop_prob=0.5):
         """ Create mask with values missing at random
         :param t_init_mask: observed steps in the beginning of the sequence
         :param drop_prob: probability of not observing a step
         :return: np.ndarray
         """
-        mask_impute = np.ones((self.config.batch_size, self.test_n_timesteps), dtype=np.float32)
+        mask_impute = np.ones((self.config.batch_size, n_timesteps), dtype=np.float32)
 
-        n_steps = self.test_n_timesteps - t_init_mask
+        n_steps = n_timesteps - t_init_mask
         mask_impute[:, t_init_mask:] = np.random.choice([0, 1], size=(self.config.batch_size, n_steps),
                                                                    p=[drop_prob, 1.0 - drop_prob])
         return mask_impute
@@ -649,11 +798,13 @@ class KalmanVariationalAutoencoder(object):
         for i, v in enumerate(vec):
             if mask_type == 'missing_planning':
                 print("--- Imputation planning, t_steps_mask %s" % v)
-                mask_impute = self.mask_impute_planning(t_init_mask=self.config.t_init_mask,
+                mask_impute = self.mask_impute_planning(self.test_n_timesteps,
+                                                        t_init_mask=self.config.t_init_mask,
                                                         t_steps_mask=v)
             elif mask_type == 'missing_random':
                 print("--- Imputation random, drop_prob %s" % v)
-                mask_impute = self.mask_impute_random(t_init_mask=self.config.t_init_mask,
+                mask_impute = self.mask_impute_random(self.test_n_timesteps,
+                                                      t_init_mask=self.config.t_init_mask,
                                                       drop_prob=v)
             else:
                 raise NotImplementedError
@@ -666,24 +817,23 @@ class KalmanVariationalAutoencoder(object):
         hamm_x_imputed = out_res_all[:, 0]
         hamm_x_filtered = out_res_all[:, 1]
         baseline = out_res_all[:, 3]
+        mse_x_imputed = out_res_all[:, 6]
+        mse_x_filtered = out_res_all[:, 7]
 
-        results = [(baseline, 'Baseline'),
-                   (hamm_x_imputed, 'KVAE smoothing'),
-                   (hamm_x_filtered, 'KVAE filtering')]
+        results = [(mse_x_imputed, 'KVAE smoothing'),
+                   (mse_x_filtered, 'KVAE filtering')]
 
         print(out_res_all)
         import matplotlib as mpl
         import matplotlib.pyplot as plt
         mpl.rcParams['xtick.labelsize'] = 14
         mpl.rcParams['ytick.labelsize'] = 14
+        plt.figure(figsize=(7,7))
         for dist, label in results:
-            if label == 'Baseline':
-                linestyle = '--'
-            else:
-                linestyle = '.-'
+            linestyle = '.-'
             plt.plot(vec, dist, linestyle, linewidth=3, ms=20, label=label)
         plt.xlabel(xlab, fontsize=20)
-        plt.ylabel('Hamming distance', fontsize=20)
+        plt.ylabel('MSE', fontsize=20)
         plt.legend(fontsize=20, loc=1)
         plt.savefig(self.config.log_dir + '/imputation_%s.png' % mask_type)
         plt.close()

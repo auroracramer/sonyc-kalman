@@ -3,8 +3,10 @@ import os
 
 import numpy as np
 import tensorflow as tf
-from .kvae import KalmanVariationalAutoencoder
-from .kvae.utils import reload_config, get_train_config
+from kvae import KalmanVariationalAutoencoder
+from kvae.utils import reload_config, get_train_config
+
+from data import construct_kvae_data
 
 import seaborn as sns
 sns.set_style("whitegrid", {'axes.grid': False})
@@ -23,22 +25,36 @@ def run():
     config = reload_config(config.FLAGS)
 
     # Load data:
-    if not config.train_data:
-        raise ValueError('Must provide path to training data.')
+    if not config.data_path:
+        raise ValueError('Must provide path to data.')
 
-    if not os.path.isfile(config.train_data):
-        err_msg = 'Invalid path to training data: {}'
-        raise ValueError(err_msg.format(config.train_data))
+    if not os.path.isfile(config.data_path):
+        err_msg = 'Invalid path to data: {}'
+        raise ValueError(err_msg.format(config.data_path))
 
-    if not config.test_data:
-        raise ValueError('Must provide path to testing data.')
+    if not config.train_mask_path:
+        raise ValueError('Must provide path to training mask.')
 
-    if not os.path.isfile(config.test_data):
-        err_msg = 'Invalid path to testing data: {}'
-        raise ValueError(err_msg.format(config.test_data))
+    if not os.path.isfile(config.train_mask_path):
+        err_msg = 'Invalid path to training mask: {}'
+        raise ValueError(err_msg.format(config.train_mask_path))
 
-    train_data = np.load(config.train_data)
-    test_data = np.load(config.test_data)
+    if not config.test_mask_path:
+        raise ValueError('Must provide path to testing mask.')
+
+    if not os.path.isfile(config.test_mask_path):
+        err_msg = 'Invalid path to testing mask: {}'
+        raise ValueError(err_msg.format(config.test_mask_path))
+
+    data = np.load(config.data_path)
+    X, mask = data['X'], data['mask']
+    train_subset_mask = np.load(config.train_mask_path)
+    test_subset_mask = np.load(config.test_mask_path)
+
+    train_data, train_mask = construct_kvae_data(X, mask, train_subset_mask,
+                                                 n_timesteps=config.n_timesteps,
+                                                 hop_length=config.hop_length)
+    test_data, test_mask = construct_kvae_data(X, mask, test_subset_mask, test=True)
 
     # Add timestamp to log path
     config.log_dir = os.path.join(config.log_dir, '%s' % config.run_name)
@@ -52,14 +68,14 @@ def run():
 
     # Save hyperparameters
     with open(config.log_dir + '/config.json', 'w') as f:
-        json.dump(list(config.__flags), f)
+        json.dump({k: v.value for k,v in config.__flags.items()}, f)
 
 
     # Set GPU
     os.environ['CUDA_VISIBLE_DEVICES'] = config.gpu
 
     with tf.Session() as sess:
-        model = KalmanVariationalAutoencoder(train_data, test_data, config, sess)
+        model = KalmanVariationalAutoencoder(train_data, test_data, train_mask, test_mask, config, sess)
 
         model.build_model().build_loss().initialize_variables()
         err = model.train()
