@@ -632,7 +632,7 @@ class KalmanVariationalAutoencoder(object):
                    mse_unobs['smooth'], mse_unobs['filt'], mse_unobs['gen'])
         return out_res
 
-    def impute_sonyc(self, data, test_mask, valid_mask, plot=True):
+    def impute_sonyc(self, data, test_mask, valid_mask, plot=True, return_output=False):
         if data.ndim == 2:
             data = data[np.newaxis, ...]
         if test_mask.ndim == 1:
@@ -708,8 +708,12 @@ class KalmanVariationalAutoencoder(object):
                 mse_unobs['smooth'], mse_unobs['filt']))
             print("Normalized RMSE. a_imputed: %.3f" % norm_rmse_a_imputed)
 
-        out_res = (norm_rmse_a_imputed, mse_unobs['smooth'], mse_unobs['filt'])
-        return out_res
+        if return_output:
+            out_res = (norm_rmse_a_imputed, mse_unobs['smooth'], mse_unobs['filt'])
+            return out_res
+        else:
+            out_res = (norm_rmse_a_imputed, mse_unobs['smooth'], mse_unobs['filt'], x_filtered, x_imputed)
+            return out_res
 
     def img_alpha_nn(self, range_x=(-30, 30), range_y=(-30, 30), N_points=50, n=99999):
         """ Visualise the output of the dynamics parameter network alpha over _a_ when dim_a == 2 and alpha_rnn=False

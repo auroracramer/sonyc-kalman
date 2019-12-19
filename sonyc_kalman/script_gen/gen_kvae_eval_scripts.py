@@ -23,7 +23,7 @@ train_mask_path = os.path.join(data_dir, 'sonycnode-b827eb2a1bce_60minslot_medoi
 test_mask_path = os.path.join(data_dir, 'sonycnode-b827eb2a1bce_60minslot_medoid_test_mask.npy')
 output_dir = os.path.join(data_dir, "output")
 
-gb_per_thread = 12
+gb_per_thread = 20
 cpus_per_task = 4
 jobs_per_file = 16
 threads_per_file = 4
